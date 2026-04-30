@@ -18,10 +18,11 @@ EST = ZoneInfo("America/New_York")
 ROTATION = ["A", "B", "C", "D"]
 
 BLOCKS = {
-    "A": {"label": "8am – 2pm",  "start_h": 8,  "end_h": 14},
-    "B": {"label": "9am – 3pm",  "start_h": 9,  "end_h": 15},
-    "C": {"label": "2pm – 8pm",  "start_h": 14, "end_h": 20},
-    "D": {"label": "4pm – 10pm", "start_h": 16, "end_h": 22},
+    # label = time range  ·  activity = what the rep is doing during that block
+    "A": {"label": "8am – 2pm",  "activity": "Speed to Lead → Power Dialer", "start_h": 8,  "end_h": 14},
+    "B": {"label": "9am – 3pm",  "activity": "Power Dialer → Speed to Lead → Power Dialer", "start_h": 9,  "end_h": 15},
+    "C": {"label": "2pm – 8pm",  "activity": "Speed to Lead → Power Dialer", "start_h": 14, "end_h": 20},
+    "D": {"label": "4pm – 10pm", "activity": "Power Dialer → Speed to Lead → Mixed Follow-up", "start_h": 16, "end_h": 22},
 }
 
 # The week starting this Monday is the reference. All other weeks computed by rotation.
@@ -38,33 +39,42 @@ def _week_monday(target_date):
     return target_date - timedelta(days=target_date.weekday())
 
 
-def block_for_rep(rep, target_date):
-    """Which shift block is the rep on, for the week containing target_date?"""
+def block_for_rep(rep, target_date, overrides=None):
+    """Which shift block is the rep on, for the week containing target_date?
+
+    `overrides`: optional dict of `{ "Sarah_2026-04-27": "C", ... }` from the
+    Shift Overrides data store. If a matching override exists for this
+    (rep, week_monday), it wins over the rotation formula.
+    """
     if rep not in REFERENCE_ASSIGNMENTS:
         return None
     monday = _week_monday(target_date)
+    if overrides:
+        ov = overrides.get(f"{rep}_{monday.strftime('%Y-%m-%d')}")
+        if ov in ROTATION:
+            return ov
     weeks_diff = (monday - REFERENCE_WEEK).days // 7
     base_idx = ROTATION.index(REFERENCE_ASSIGNMENTS[rep])
     new_idx = (base_idx + weeks_diff) % len(ROTATION)
     return ROTATION[new_idx]
 
 
-def shift_label_for_rep(rep, target_date=None):
+def shift_label_for_rep(rep, target_date=None, overrides=None):
     """e.g. '9am – 3pm' for the rep's current week."""
     if target_date is None:
         target_date = datetime.now(EST).date()
-    block = block_for_rep(rep, target_date)
+    block = block_for_rep(rep, target_date, overrides)
     return BLOCKS[block]["label"] if block else None
 
 
-def shift_status(rep, dt_est=None):
+def shift_status(rep, dt_est=None, overrides=None):
     """Return one of: 'on_shift', 'before_shift', 'after_shift', 'off_day'.
 
     Sundays: only the Block-B rep this week is on a working day.
     """
     if dt_est is None:
         dt_est = datetime.now(EST)
-    block = block_for_rep(rep, dt_est.date())
+    block = block_for_rep(rep, dt_est.date(), overrides)
     if not block:
         return "off_day"
     # Sunday — only Block-B rep works
@@ -78,12 +88,12 @@ def shift_status(rep, dt_est=None):
     return "on_shift"
 
 
-def is_on_shift(rep, dt_est=None):
-    return shift_status(rep, dt_est) == "on_shift"
+def is_on_shift(rep, dt_est=None, overrides=None):
+    return shift_status(rep, dt_est, overrides) == "on_shift"
 
 
-def all_assignments_for_week(target_date=None):
+def all_assignments_for_week(target_date=None, overrides=None):
     """Map of {rep: block_id} for the week containing target_date."""
     if target_date is None:
         target_date = datetime.now(EST).date()
-    return {rep: block_for_rep(rep, target_date) for rep in REFERENCE_ASSIGNMENTS}
+    return {rep: block_for_rep(rep, target_date, overrides) for rep in REFERENCE_ASSIGNMENTS}

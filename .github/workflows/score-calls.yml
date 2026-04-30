@@ -25,4 +25,5 @@ jobs:
           TIPS_INGEST_URL: ${{ secrets.TIPS_INGEST_URL }}
           TOPCALL_INGEST_URL: ${{ secrets.TOPCALL_INGEST_URL }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          SHIFT_OVERRIDE_API_URL: ${{ secrets.SHIFT_OVERRIDE_API_URL }}
         run: python scripts/score_calls.py

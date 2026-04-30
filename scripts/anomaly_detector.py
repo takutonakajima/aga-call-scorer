@@ -27,7 +27,7 @@ from pathlib import Path
 # Add scripts dir to path then import shared config + schedule
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _config import (TWILIO_ACCOUNT, TWILIO_AUTH, REP_MAP, ALERT_WEBHOOK)
+from _config import (TWILIO_ACCOUNT, TWILIO_AUTH, REP_MAP, ALERT_WEBHOOK, SHIFT_OVERRIDE_API)
 from _schedule import EST, shift_status, shift_label_for_rep, BLOCKS, block_for_rep
 
 STATE_FILE = Path.home() / ".aga-anomaly-state"
@@ -149,13 +149,29 @@ def identify_rep(recording):
     return REP_MAP.get(from_field[:7])
 
 
+def fetch_shift_overrides():
+    """Fetch the shift overrides map from the Shift Overrides API.
+    Returns {} if the API isn't configured or unreachable."""
+    if not SHIFT_OVERRIDE_API:
+        return {}
+    try:
+        _, body = http("POST", SHIFT_OVERRIDE_API,
+                       headers={"Content-Type": "application/json"}, data=b"{}")
+        arr = json.loads(body) or []
+        return {f"{o.get('rep','')}_{o.get('week','')}": o.get('block')
+                for o in arr if o.get('rep') and o.get('week') and o.get('block')}
+    except Exception as e:
+        log(f"  warning: failed to fetch shift overrides ({e})")
+        return {}
+
+
 # ---- ALERT FORMATTING ------------------------------------------------------
-def build_alert_message(rep, pattern, stats, last_active_utc):
+def build_alert_message(rep, pattern, stats, last_active_utc, overrides=None):
     """Build the rich Slack message. Returns dict suitable for the alert webhook."""
     now_est = datetime.now(EST)
-    block = block_for_rep(rep, now_est.date())
-    shift_lbl = shift_label_for_rep(rep) or "—"
-    status = shift_status(rep, now_est)
+    block = block_for_rep(rep, now_est.date(), overrides)
+    shift_lbl = shift_label_for_rep(rep, overrides=overrides) or "—"
+    status = shift_status(rep, now_est, overrides)
 
     shift_phrase_map = {
         "on_shift": f"on shift now ({shift_lbl} ET)",
@@ -264,14 +280,17 @@ def gather_window(hours):
 
 def main():
     state = load_state()
+    overrides = fetch_shift_overrides()
     now_est = datetime.now(EST)
     log(f"=== Anomaly scan @ {now_est.strftime('%a %Y-%m-%d %H:%M %Z')} ===")
+    if overrides:
+        log(f"Shift overrides loaded: {overrides}")
 
     # Show this week's shifts for context
     log("This week's shifts:")
     for rep in REP_MAP.values():
-        b = block_for_rep(rep, now_est.date())
-        s = shift_status(rep, now_est)
+        b = block_for_rep(rep, now_est.date(), overrides)
+        s = shift_status(rep, now_est, overrides)
         log(f"  {rep:<10} block {b} ({BLOCKS[b]['label']}) — currently {s}")
 
     long_window = gather_window(VOICEMAIL_WALL_WINDOW)
@@ -284,14 +303,14 @@ def main():
         today_stats = today_window.get(rep, {"dials": 0, "connects": 0, "last_active": None})
         last_active = (long_stats.get("last_active") or today_stats.get("last_active"))
 
-        rep_status = shift_status(rep, now_est)
+        rep_status = shift_status(rep, now_est, overrides)
         long_rate = (long_stats["connects"] / long_stats["dials"]) if long_stats["dials"] else 0
 
         # 1. VOICEMAIL_WALL — fires regardless of shift (always relevant)
         if (long_stats["dials"] >= VOICEMAIL_WALL_DIALS
                 and long_stats["connects"] == 0
                 and not already_alerted_today(state, rep, "VOICEMAIL_WALL")):
-            payload = build_alert_message(rep, "VOICEMAIL_WALL", long_stats, last_active)
+            payload = build_alert_message(rep, "VOICEMAIL_WALL", long_stats, last_active, overrides)
             send_alert(payload)
             mark_alerted(state, rep, "VOICEMAIL_WALL")
             continue
@@ -300,7 +319,7 @@ def main():
         if (long_stats["dials"] >= LOW_CONNECT_RATE_DIALS
                 and long_rate < LOW_CONNECT_RATE_THRESHOLD
                 and not already_alerted_today(state, rep, "LOW_CONNECT_RATE")):
-            payload = build_alert_message(rep, "LOW_CONNECT_RATE", long_stats, last_active)
+            payload = build_alert_message(rep, "LOW_CONNECT_RATE", long_stats, last_active, overrides)
             send_alert(payload)
             mark_alerted(state, rep, "LOW_CONNECT_RATE")
             continue
@@ -310,7 +329,7 @@ def main():
                 and short_stats["dials"] >= NO_CONVERSATIONS_DIALS
                 and short_stats["connects"] == 0
                 and not already_alerted_today(state, rep, "NO_CONVERSATIONS")):
-            payload = build_alert_message(rep, "NO_CONVERSATIONS", short_stats, last_active)
+            payload = build_alert_message(rep, "NO_CONVERSATIONS", short_stats, last_active, overrides)
             send_alert(payload)
             mark_alerted(state, rep, "NO_CONVERSATIONS")
             continue
@@ -320,7 +339,7 @@ def main():
                 and today_stats["connects"] >= 3
                 and short_stats["dials"] == 0
                 and not already_alerted_today(state, rep, "LONG_GAP")):
-            payload = build_alert_message(rep, "LONG_GAP", today_stats, last_active)
+            payload = build_alert_message(rep, "LONG_GAP", today_stats, last_active, overrides)
             send_alert(payload)
             mark_alerted(state, rep, "LONG_GAP")
 
