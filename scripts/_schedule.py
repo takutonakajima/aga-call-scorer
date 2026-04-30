@@ -1,11 +1,21 @@
 """
 Rep shift schedule — 4-week rotating cycle with 4 shift blocks.
 
+⚠️  THIS FILE IS THE SOURCE OF TRUTH FOR THE SHIFT SCHEDULE.
+
+⚠️  IF YOU CHANGE BLOCKS, ROTATION, REFERENCE WEEK, OR ASSIGNMENTS BELOW,
+    YOU MUST ALSO UPDATE THESE TWO MIRRORS (constants near the top of each):
+      • Call Coaching AI/rep.html      → SHIFT_* constants
+      • Call Coaching AI/manager.html  → SHIFT_* constants
+
+    The hardcoded values must stay identical across all three files or
+    the dashboard, anomaly detector, and rep view will disagree.
+
 Reference week (Mon Apr 27, 2026):
-  Block A (8am – 2pm ET)   →  Jelyn
-  Block B (9am – 3pm ET)   →  Sarah
-  Block C (2pm – 8pm ET)   →  Chris
-  Block D (4pm – 10pm ET)  →  Julie
+  Block A (8am – 2pm ET)   →  Jelyn  →  Speed to Lead → Power Dialer
+  Block B (9am – 3pm ET)   →  Sarah  →  Power Dialer → Speed to Lead → Power Dialer
+  Block C (2pm – 8pm ET)   →  Chris  →  Speed to Lead → Power Dialer
+  Block D (4pm – 10pm ET)  →  Julie  →  Power Dialer → Speed to Lead → Mixed Follow-up
 
 Each rep advances one block per week (A → B → C → D → A → ...).
 On Sundays, only the rep on Block B is scheduled.
