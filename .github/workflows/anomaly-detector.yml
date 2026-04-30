@@ -26,4 +26,6 @@ jobs:
           TOPCALL_INGEST_URL: ${{ secrets.TOPCALL_INGEST_URL }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           SHIFT_OVERRIDE_API_URL: ${{ secrets.SHIFT_OVERRIDE_API_URL }}
+          ANOMALY_STATE_API_URL: ${{ secrets.ANOMALY_STATE_API_URL }}
+          ANOMALY_STATE_INGEST_URL: ${{ secrets.ANOMALY_STATE_INGEST_URL }}
         run: python scripts/anomaly_detector.py

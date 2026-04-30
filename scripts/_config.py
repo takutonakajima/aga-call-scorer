@@ -15,7 +15,9 @@ DIALS_INGEST = os.environ["DIALS_INGEST_URL"]
 TIPS_INGEST = os.environ["TIPS_INGEST_URL"]
 TOPCALL_INGEST = os.environ["TOPCALL_INGEST_URL"]
 ALERT_WEBHOOK = os.environ["ALERT_WEBHOOK_URL"]
-SHIFT_OVERRIDE_API = os.environ.get("SHIFT_OVERRIDE_API_URL", "")  # optional
+SHIFT_OVERRIDE_API = os.environ.get("SHIFT_OVERRIDE_API_URL", "")          # optional
+ANOMALY_STATE_API = os.environ.get("ANOMALY_STATE_API_URL", "")            # optional
+ANOMALY_STATE_INGEST = os.environ.get("ANOMALY_STATE_INGEST_URL", "")      # optional
 
 REP_MAP = {
     "117-243": "Chris",

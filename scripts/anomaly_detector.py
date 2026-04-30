@@ -27,7 +27,8 @@ from pathlib import Path
 # Add scripts dir to path then import shared config + schedule
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _config import (TWILIO_ACCOUNT, TWILIO_AUTH, REP_MAP, ALERT_WEBHOOK, SHIFT_OVERRIDE_API)
+from _config import (TWILIO_ACCOUNT, TWILIO_AUTH, REP_MAP, ALERT_WEBHOOK,
+                     SHIFT_OVERRIDE_API, ANOMALY_STATE_API, ANOMALY_STATE_INGEST)
 from _schedule import EST, shift_status, shift_label_for_rep, BLOCKS, block_for_rep
 
 STATE_FILE = Path.home() / ".aga-anomaly-state"
@@ -63,6 +64,22 @@ def http(method, url, headers=None, data=None, timeout=30):
 
 
 def load_state():
+    """Fetch anomaly alert state from Make.com data store. Stateless across runs.
+    Falls back to local file (dev mode) if the API isn't configured."""
+    if ANOMALY_STATE_API:
+        try:
+            _, body = http("POST", ANOMALY_STATE_API,
+                           headers={"Content-Type": "application/json"}, data=b"{}")
+            arr = json.loads(body) or []
+            state = {}
+            for r in arr:
+                rep, pat, dt = r.get("rep"), r.get("pattern"), r.get("alerted_date")
+                if rep and pat and dt:
+                    state.setdefault(rep, {})[pat] = dt
+            return state
+        except Exception as e:
+            log(f"  warning: anomaly state fetch failed ({e}); using empty state")
+            return {}
     if STATE_FILE.exists():
         try:
             return json.loads(STATE_FILE.read_text())
@@ -72,17 +89,35 @@ def load_state():
 
 
 def save_state(state):
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    """Local-mode only — when running with ANOMALY_STATE_API set,
+    each fired alert calls write_state() individually. This is a no-op."""
+    if not ANOMALY_STATE_API:
+        STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def write_state(rep, pattern, alerted_date):
+    """Persist a single (rep, pattern, date) record to the data store."""
+    if not ANOMALY_STATE_INGEST:
+        return
+    try:
+        http("POST", ANOMALY_STATE_INGEST,
+             headers={"Content-Type": "application/json"},
+             data=json.dumps({
+                 "rep": rep, "pattern": pattern, "alerted_date": alerted_date
+             }).encode())
+    except Exception as e:
+        log(f"  warning: anomaly state write failed ({e})")
 
 
 def already_alerted_today(state, rep, pattern):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(EST).strftime("%Y-%m-%d")
     return state.get(rep, {}).get(pattern) == today
 
 
 def mark_alerted(state, rep, pattern):
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(EST).strftime("%Y-%m-%d")
     state.setdefault(rep, {})[pattern] = today
+    write_state(rep, pattern, today)   # persist remotely too
 
 
 def fmt_time_ago(dt_utc):
