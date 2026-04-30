@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """
-AGA Anomaly Detector — runs hourly via launchd.
+AGA Anomaly Detector — runs hourly via GitHub Actions.
 
-Scans recent Twilio activity per rep and flags suspicious patterns:
+Schedule-aware. Each rep has a known shift block this week (see _schedule.py).
+Patterns are evaluated against shift status so we don't ping reps who are off.
 
-  1. VOICEMAIL_WALL
-     20+ dials in last 4h with 0 conversations ≥30s. (Julie's pattern.)
-     "Tons of dials, no real conversations" — connection issue or dialer problem.
+Patterns:
+  1. VOICEMAIL_WALL    — 20+ dials in 4h with 0 conversations ≥30s
+  2. LOW_CONNECT_RATE  — 30+ dials with <5% connect rate (Julie's pattern)
+  3. NO_CONVERSATIONS  — 5+ dials in 2h with 0 conversations
+  4. LONG_GAP          — connects earlier today + silent for 2h+ DURING SHIFT
+                         (won't fire if rep is off-shift)
 
-  2. NO_CONVERSATIONS
-     5+ dials in last 2h with 0 conversations ≥30s. Earlier-stage version
-     of voicemail wall — caught faster.
-
-  3. LONG_GAP
-     Rep had real conversations earlier today but has been silent
-     (zero dials) for 2+ hours.
-
-When a pattern fires, posts a diagnostic message to the Slack alerts webhook
-(Make.com scenario routes to Sophia + Juan). State file prevents re-alerting
-the same pattern more than once per rep per day.
+Each fired alert posts a fully-formatted Slack message via the alert webhook.
+The message includes shift context, last-active time, benchmark + suggested action.
 """
 import json
 import urllib.error
@@ -26,34 +21,32 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
-# Add scripts dir to path then import shared config
+# Add scripts dir to path then import shared config + schedule
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _config import (TWILIO_ACCOUNT, TWILIO_AUTH, GEMINI_KEY, REP_MAP,
-                     SCORE_INGEST, SCORE_API, DIALS_INGEST, TIPS_INGEST,
-                     TOPCALL_INGEST, ALERT_WEBHOOK)
-
-# ---- CONFIG -----------------------------------------------------------------
-
-
-
-
+from _config import (TWILIO_ACCOUNT, TWILIO_AUTH, REP_MAP, ALERT_WEBHOOK)
+from _schedule import EST, shift_status, shift_label_for_rep, BLOCKS, block_for_rep
 
 STATE_FILE = Path.home() / ".aga-anomaly-state"
 LOG_DIR = Path.home() / "Library/Logs/aga-call-scorer"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Thresholds
-VOICEMAIL_WALL_DIALS = 20          # 20+ dials, 0 connects in 4h window
+VOICEMAIL_WALL_DIALS = 20
 VOICEMAIL_WALL_WINDOW = 4
-LOW_CONNECT_RATE_DIALS = 30        # 30+ dials with connect rate < 5% — Julie's pattern
+LOW_CONNECT_RATE_DIALS = 30
 LOW_CONNECT_RATE_THRESHOLD = 0.05
-NO_CONVERSATIONS_DIALS = 5         # 5+ dials, 0 connects in 2h
+NO_CONVERSATIONS_DIALS = 5
 NO_CONVERSATIONS_WINDOW = 2
 LONG_GAP_HOURS = 2
-MIN_CONVERSATION_DUR = 30          # seconds — defines a "real conversation"
+MIN_CONVERSATION_DUR = 30  # seconds
+
+# Healthy connect-rate benchmark (for the alert message)
+BENCHMARK_LO = 20
+BENCHMARK_HI = 25
 
 
 # ---- HELPERS ----------------------------------------------------------------
@@ -92,6 +85,26 @@ def mark_alerted(state, rep, pattern):
     state.setdefault(rep, {})[pattern] = today
 
 
+def fmt_time_ago(dt_utc):
+    """e.g. '2h 10m ago' from a UTC datetime."""
+    if not dt_utc:
+        return "—"
+    delta = datetime.now(timezone.utc) - dt_utc
+    mins = int(delta.total_seconds() // 60)
+    if mins < 1: return "just now"
+    if mins < 60: return f"{mins}m ago"
+    h = mins // 60
+    m = mins % 60
+    return f"{h}h {m}m ago" if m else f"{h}h ago"
+
+
+def fmt_clock(dt_utc):
+    """e.g. '1:20 PM ET' from a UTC datetime."""
+    if not dt_utc:
+        return "—"
+    return dt_utc.astimezone(EST).strftime("%-I:%M %p ET")
+
+
 # ---- TWILIO -----------------------------------------------------------------
 def fetch(url):
     _, body = http("GET", url, headers={"Authorization": TWILIO_AUTH})
@@ -99,7 +112,6 @@ def fetch(url):
 
 
 def list_recent_recordings(hours):
-    """All recordings created in last N hours."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     since_str = since.strftime("%Y-%m-%dT%H:%M:%SZ")
     url = (
@@ -119,18 +131,14 @@ def list_recent_recordings(hours):
 
 
 def get_call(sid):
-    if not sid:
-        return None
+    if not sid: return None
     try:
-        return fetch(
-            f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT}/Calls/{sid}.json"
-        )
+        return fetch(f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT}/Calls/{sid}.json")
     except urllib.error.HTTPError:
         return None
 
 
 def identify_rep(recording):
-    """Look up parent call to find which rep dialed."""
     call = get_call(recording.get("call_sid"))
     parent = get_call(call.get("parent_call_sid")) if call else None
     from_field = ""
@@ -141,65 +149,101 @@ def identify_rep(recording):
     return REP_MAP.get(from_field[:7])
 
 
-# ---- ALERT ------------------------------------------------------------------
-def send_alert(rep, pattern, stats):
-    """Post a structured payload to the alert webhook (Slack DM scenario)."""
-    title_map = {
-        "VOICEMAIL_WALL": f"🚨 {rep} — voicemail wall",
-        "LOW_CONNECT_RATE": f"⚠️ {rep} — abnormally low connect rate",
-        "NO_CONVERSATIONS": f"⚠️ {rep} — no real conversations",
-        "LONG_GAP": f"⏸️ {rep} — silent during shift",
+# ---- ALERT FORMATTING ------------------------------------------------------
+def build_alert_message(rep, pattern, stats, last_active_utc):
+    """Build the rich Slack message. Returns dict suitable for the alert webhook."""
+    now_est = datetime.now(EST)
+    block = block_for_rep(rep, now_est.date())
+    shift_lbl = shift_label_for_rep(rep) or "—"
+    status = shift_status(rep, now_est)
+
+    shift_phrase_map = {
+        "on_shift": f"on shift now ({shift_lbl} ET)",
+        "before_shift": f"shift hasn't started ({shift_lbl} ET)",
+        "after_shift": f"shift ended ({shift_lbl} ET)",
+        "off_day": "off today",
     }
+    shift_phrase = shift_phrase_map.get(status, "—")
+    last_active_phrase = (
+        f"Last active: {fmt_clock(last_active_utc)} ({fmt_time_ago(last_active_utc)})"
+        if last_active_utc else "Last active: no calls yet today"
+    )
+
     rate = (stats['connects'] / stats['dials'] * 100) if stats.get('dials') else 0
-    msg_map = {
-        "VOICEMAIL_WALL": (
-            f"{rep} has dialed {stats['dials']} times in the last "
-            f"{VOICEMAIL_WALL_WINDOW}h with *zero* calls ≥30s. "
-            "Possible connection issue, autodialer problem, or working off-system. "
-            "Worth a quick check-in: is everything OK on her end?"
-        ),
-        "LOW_CONNECT_RATE": (
-            f"{rep} has made {stats['dials']} dials in the last "
-            f"{VOICEMAIL_WALL_WINDOW}h but only {stats['connects']} real conversations "
-            f"({rate:.1f}% connect rate). "
-            "For comparison, healthy reps run ~20-25%. "
-            "Possible voicemail-only dialing list, dialer config issue, or list quality problem."
-        ),
-        "NO_CONVERSATIONS": (
-            f"{rep} has dialed {stats['dials']} times in the last "
-            f"{NO_CONVERSATIONS_WINDOW}h with no real conversations yet. "
-            "Could just be a slow connect window — but worth watching."
-        ),
-        "LONG_GAP": (
-            f"{rep} had real conversations earlier today but has been silent "
-            f"for {LONG_GAP_HOURS}+ hours (zero dials). "
-            "Either on break/done for the day or unaware of an issue."
-        ),
-    }
-    payload = {
+
+    if pattern == "VOICEMAIL_WALL":
+        title = f"🚨 {rep} — Voicemail Wall"
+        body = (
+            f"*{stats['dials']} dials / {stats['connects']} conversations* "
+            f"(last {VOICEMAIL_WALL_WINDOW}h)\n"
+            f"Connect rate: *0%* · Benchmark: {BENCHMARK_LO}–{BENCHMARK_HI}%\n"
+            f"{last_active_phrase} · {shift_phrase}\n"
+            f"_Likely issue:_ dialer down, connection problem, or working off-system\n"
+            f"*👉 Action:* check in with {rep} now"
+        )
+    elif pattern == "LOW_CONNECT_RATE":
+        emoji = "🔴"
+        title = f"{emoji} {rep} — Low Connect Rate ({rate:.1f}%)"
+        body = (
+            f"*{stats['dials']} dials / {stats['connects']} conversations* "
+            f"(last {VOICEMAIL_WALL_WINDOW}h)\n"
+            f"Benchmark: {BENCHMARK_LO}–{BENCHMARK_HI}%\n"
+            f"{last_active_phrase} · {shift_phrase}\n"
+            f"_Likely issue:_ list quality / dialer config\n"
+            f"*👉 Action:* message {rep}, ask about list/dialer"
+        )
+    elif pattern == "NO_CONVERSATIONS":
+        title = f"⚠️ {rep} — No Conversations Yet"
+        body = (
+            f"*{stats['dials']} dials / 0 conversations* (last {NO_CONVERSATIONS_WINDOW}h)\n"
+            f"{last_active_phrase} · {shift_phrase}\n"
+            f"_Likely issue:_ slow connect window, or just bad luck — watch but don't act yet\n"
+            f"*👉 Action:* keep an eye on it for the next hour"
+        )
+    elif pattern == "LONG_GAP":
+        title = f"🟡 {rep} — No Activity ({fmt_time_ago(last_active_utc)})"
+        body = (
+            f"Had {stats['connects']} real conversations earlier today, "
+            f"but no dials in the last {LONG_GAP_HOURS}h.\n"
+            f"{last_active_phrase} · {shift_phrase}\n"
+            f"_Likely:_ on break, or done for the day — confirm don't accuse\n"
+            f"*👉 Action:* quick check-in: \"everything OK?\""
+        )
+    else:
+        title = f"{rep} — {pattern}"
+        body = ""
+
+    return {
         "rep": rep,
         "pattern": pattern,
-        "title": title_map.get(pattern, pattern),
-        "message": msg_map.get(pattern, ""),
+        "title": title,
+        "message": body,
+        "shift_block": block,
+        "shift_label": shift_lbl,
+        "shift_status": status,
+        "last_active_utc": last_active_utc.isoformat() if last_active_utc else None,
         "stats": stats,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+
+
+def send_alert(payload):
     if ALERT_WEBHOOK and "PLACEHOLDER" not in ALERT_WEBHOOK:
         try:
             http("POST", ALERT_WEBHOOK,
                  headers={"Content-Type": "application/json"},
                  data=json.dumps(payload).encode())
-            log(f"  → ALERT sent: {pattern} for {rep}")
+            log(f"  → ALERT sent: {payload['pattern']} for {payload['rep']}")
         except Exception as e:
-            log(f"  → alert webhook failed ({e}); logged below")
-    log(f"  ALERT [{pattern}] {rep}: {msg_map.get(pattern,'')}")
+            log(f"  → alert webhook failed ({e})")
+    log(f"  ALERT [{payload['pattern']}] {payload['rep']}")
 
 
 # ---- MAIN -------------------------------------------------------------------
 def gather_window(hours):
-    """Return {rep: {'dials': int, 'connects': int}} for the last N hours."""
+    """Return per-rep activity in the last N hours, including last_active timestamp."""
     recs = list_recent_recordings(hours)
-    by_rep = defaultdict(lambda: {"dials": 0, "connects": 0, "samples": []})
+    by_rep = defaultdict(lambda: {"dials": 0, "connects": 0, "last_active": None})
     for r in recs:
         rep = identify_rep(r)
         if not rep:
@@ -208,57 +252,76 @@ def gather_window(hours):
         by_rep[rep]["dials"] += 1
         if dur >= MIN_CONVERSATION_DUR:
             by_rep[rep]["connects"] += 1
-        by_rep[rep]["samples"].append(dur)
+        # Track most recent recording timestamp
+        try:
+            ts = parsedate_to_datetime(r.get("date_created", "")).astimezone(timezone.utc)
+            if not by_rep[rep]["last_active"] or ts > by_rep[rep]["last_active"]:
+                by_rep[rep]["last_active"] = ts
+        except Exception:
+            pass
     return by_rep
 
 
 def main():
     state = load_state()
+    now_est = datetime.now(EST)
+    log(f"=== Anomaly scan @ {now_est.strftime('%a %Y-%m-%d %H:%M %Z')} ===")
 
-    log("=== Anomaly scan ===")
-    long_window = gather_window(VOICEMAIL_WALL_WINDOW)
-    log(f"4h window: {dict((r,(s['dials'],s['connects'])) for r,s in long_window.items())}")
-
-    short_window = gather_window(NO_CONVERSATIONS_WINDOW)
-    log(f"2h window: {dict((r,(s['dials'],s['connects'])) for r,s in short_window.items())}")
-
-    today_window = gather_window(12)  # for LONG_GAP we need to know today's earlier activity
-    log(f"12h window: {dict((r,(s['dials'],s['connects'])) for r,s in today_window.items())}")
-
-    # ---- Pattern checks -----------------------------------------------------
+    # Show this week's shifts for context
+    log("This week's shifts:")
     for rep in REP_MAP.values():
-        long_stats = long_window.get(rep, {"dials": 0, "connects": 0})
-        short_stats = short_window.get(rep, {"dials": 0, "connects": 0})
-        today_stats = today_window.get(rep, {"dials": 0, "connects": 0})
+        b = block_for_rep(rep, now_est.date())
+        s = shift_status(rep, now_est)
+        log(f"  {rep:<10} block {b} ({BLOCKS[b]['label']}) — currently {s}")
 
+    long_window = gather_window(VOICEMAIL_WALL_WINDOW)
+    short_window = gather_window(NO_CONVERSATIONS_WINDOW)
+    today_window = gather_window(12)
+
+    for rep in REP_MAP.values():
+        long_stats = long_window.get(rep, {"dials": 0, "connects": 0, "last_active": None})
+        short_stats = short_window.get(rep, {"dials": 0, "connects": 0, "last_active": None})
+        today_stats = today_window.get(rep, {"dials": 0, "connects": 0, "last_active": None})
+        last_active = (long_stats.get("last_active") or today_stats.get("last_active"))
+
+        rep_status = shift_status(rep, now_est)
         long_rate = (long_stats["connects"] / long_stats["dials"]) if long_stats["dials"] else 0
 
-        # 1. VOICEMAIL_WALL — many dials, zero connects
+        # 1. VOICEMAIL_WALL — fires regardless of shift (always relevant)
         if (long_stats["dials"] >= VOICEMAIL_WALL_DIALS
                 and long_stats["connects"] == 0
                 and not already_alerted_today(state, rep, "VOICEMAIL_WALL")):
-            send_alert(rep, "VOICEMAIL_WALL", long_stats)
+            payload = build_alert_message(rep, "VOICEMAIL_WALL", long_stats, last_active)
+            send_alert(payload)
             mark_alerted(state, rep, "VOICEMAIL_WALL")
+            continue
 
-        # 2. LOW_CONNECT_RATE — many dials, abnormally low connect rate (Julie's pattern)
-        elif (long_stats["dials"] >= LOW_CONNECT_RATE_DIALS
+        # 2. LOW_CONNECT_RATE — fires regardless of shift
+        if (long_stats["dials"] >= LOW_CONNECT_RATE_DIALS
                 and long_rate < LOW_CONNECT_RATE_THRESHOLD
                 and not already_alerted_today(state, rep, "LOW_CONNECT_RATE")):
-            send_alert(rep, "LOW_CONNECT_RATE", long_stats)
+            payload = build_alert_message(rep, "LOW_CONNECT_RATE", long_stats, last_active)
+            send_alert(payload)
             mark_alerted(state, rep, "LOW_CONNECT_RATE")
+            continue
 
-        # 3. NO_CONVERSATIONS — short window, zero connects
-        elif (short_stats["dials"] >= NO_CONVERSATIONS_DIALS
+        # 3. NO_CONVERSATIONS — only DURING shift
+        if (rep_status == "on_shift"
+                and short_stats["dials"] >= NO_CONVERSATIONS_DIALS
                 and short_stats["connects"] == 0
                 and not already_alerted_today(state, rep, "NO_CONVERSATIONS")):
-            send_alert(rep, "NO_CONVERSATIONS", short_stats)
+            payload = build_alert_message(rep, "NO_CONVERSATIONS", short_stats, last_active)
+            send_alert(payload)
             mark_alerted(state, rep, "NO_CONVERSATIONS")
+            continue
 
-        # 3. LONG_GAP — had connects earlier today but no dials in last 2h
-        if (today_stats["connects"] >= 3                    # had real activity earlier
-                and short_stats["dials"] == 0                # but silent now
+        # 4. LONG_GAP — only DURING shift (don't ping for breaks/off-hours)
+        if (rep_status == "on_shift"
+                and today_stats["connects"] >= 3
+                and short_stats["dials"] == 0
                 and not already_alerted_today(state, rep, "LONG_GAP")):
-            send_alert(rep, "LONG_GAP", today_stats)
+            payload = build_alert_message(rep, "LONG_GAP", today_stats, last_active)
+            send_alert(payload)
             mark_alerted(state, rep, "LONG_GAP")
 
     save_state(state)
