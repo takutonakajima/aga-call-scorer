@@ -1,0 +1,28 @@
+name: Score Calls (every 15 min)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run scorer
+        env:
+          TWILIO_ACCOUNT: ${{ secrets.TWILIO_ACCOUNT }}
+          TWILIO_AUTH: ${{ secrets.TWILIO_AUTH }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          SCORE_INGEST_URL: ${{ secrets.SCORE_INGEST_URL }}
+          SCORE_API_URL: ${{ secrets.SCORE_API_URL }}
+          DIALS_INGEST_URL: ${{ secrets.DIALS_INGEST_URL }}
+          TIPS_INGEST_URL: ${{ secrets.TIPS_INGEST_URL }}
+          TOPCALL_INGEST_URL: ${{ secrets.TOPCALL_INGEST_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: python scripts/score_calls.py
