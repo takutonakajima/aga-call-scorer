@@ -1,0 +1,46 @@
+name: backup_data.py
+
+on:
+  schedule:
+    # Daily at 04:00 UTC = 11pm/12am ET (well after the day's activity)
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to commit + push the backup files
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Snapshot data stores
+        env:
+          TWILIO_ACCOUNT: ${{ secrets.TWILIO_ACCOUNT }}
+          TWILIO_AUTH: ${{ secrets.TWILIO_AUTH }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          SCORE_INGEST_URL: ${{ secrets.SCORE_INGEST_URL }}
+          SCORE_API_URL: ${{ secrets.SCORE_API_URL }}
+          DIALS_INGEST_URL: ${{ secrets.DIALS_INGEST_URL }}
+          TIPS_INGEST_URL: ${{ secrets.TIPS_INGEST_URL }}
+          TOPCALL_INGEST_URL: ${{ secrets.TOPCALL_INGEST_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          SHIFT_OVERRIDE_API_URL: ${{ secrets.SHIFT_OVERRIDE_API_URL }}
+          ANOMALY_STATE_API_URL: ${{ secrets.ANOMALY_STATE_API_URL }}
+          ANOMALY_STATE_INGEST_URL: ${{ secrets.ANOMALY_STATE_INGEST_URL }}
+        run: python scripts/backup_data.py
+
+      - name: Commit + push if anything changed
+        run: |
+          git config user.name "AGA Backup Bot"
+          git config user.email "backup@aga-call-scorer"
+          git add backups/
+          git diff --cached --quiet || (
+            git commit -m "Daily snapshot $(date -u +%Y-%m-%d)"
+            git push
+          )
