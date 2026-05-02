@@ -1,0 +1,114 @@
+[
+  {
+    "rep": "Chris",
+    "date": "2026-04-29",
+    "dials": 107,
+    "connects": 15,
+    "updated_at": "2026-04-30T01:28:19Z"
+  },
+  {
+    "rep": "Jelyn",
+    "date": "2026-04-29",
+    "dials": 175,
+    "connects": 41,
+    "updated_at": "2026-04-30T01:28:19Z"
+  },
+  {
+    "rep": "Sarah",
+    "date": "2026-04-29",
+    "dials": 130,
+    "connects": 9,
+    "updated_at": "2026-04-30T01:28:20Z"
+  },
+  {
+    "rep": "Julie",
+    "date": "2026-04-29",
+    "dials": 161,
+    "connects": 2,
+    "updated_at": "2026-04-30T01:28:20Z"
+  },
+  {
+    "rep": "Chris",
+    "date": "2026-04-30",
+    "dials": 85,
+    "connects": 11,
+    "updated_at": "2026-05-01T02:07:28Z"
+  },
+  {
+    "rep": "Jelyn",
+    "date": "2026-04-30",
+    "dials": 195,
+    "connects": 28,
+    "updated_at": "2026-05-01T02:07:28Z"
+  },
+  {
+    "rep": "Sarah",
+    "date": "2026-04-30",
+    "dials": 123,
+    "connects": 5,
+    "updated_at": "2026-05-01T02:07:28Z"
+  },
+  {
+    "rep": "Julie",
+    "date": "2026-04-30",
+    "dials": 162,
+    "connects": 1,
+    "updated_at": "2026-05-01T02:07:29Z"
+  },
+  {
+    "rep": "Chris",
+    "date": "2026-05-01",
+    "dials": 87,
+    "connects": 8,
+    "updated_at": "2026-05-02T03:58:35Z"
+  },
+  {
+    "rep": "Jelyn",
+    "date": "2026-05-01",
+    "dials": 185,
+    "connects": 34,
+    "updated_at": "2026-05-02T03:58:36Z"
+  },
+  {
+    "rep": "Sarah",
+    "date": "2026-05-01",
+    "dials": 169,
+    "connects": 11,
+    "updated_at": "2026-05-02T03:58:36Z"
+  },
+  {
+    "rep": "Julie",
+    "date": "2026-05-01",
+    "dials": 156,
+    "connects": 1,
+    "updated_at": "2026-05-02T03:58:36Z"
+  },
+  {
+    "rep": "Chris",
+    "date": "2026-05-02",
+    "dials": 0,
+    "connects": 0,
+    "updated_at": "2026-05-02T06:04:03Z"
+  },
+  {
+    "rep": "Jelyn",
+    "date": "2026-05-02",
+    "dials": 0,
+    "connects": 0,
+    "updated_at": "2026-05-02T06:04:03Z"
+  },
+  {
+    "rep": "Sarah",
+    "date": "2026-05-02",
+    "dials": 0,
+    "connects": 0,
+    "updated_at": "2026-05-02T06:04:03Z"
+  },
+  {
+    "rep": "Julie",
+    "date": "2026-05-02",
+    "dials": 0,
+    "connects": 0,
+    "updated_at": "2026-05-02T06:04:03Z"
+  }
+]
