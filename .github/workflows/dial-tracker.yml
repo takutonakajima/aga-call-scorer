@@ -2,7 +2,12 @@ name: dial_tracker.py
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    # Optimized 2026-05-03 from '*/30 * * * *' (48 runs/day) to ~30 runs/day.
+    # Dial counts feed the dashboard; no one views the dashboard outside
+    # 8am-9pm ET (= 12:00-02:00 UTC). Off-hours runs are pointless.
+    # To revert: replace both lines with '*/30 * * * *'
+    - cron: '*/30 12-23 * * *'  # business hours, every 30 min (UTC 12:00-23:59)
+    - cron: '*/30 0-2 * * *'    # business hours, every 30 min (UTC 00:00-02:59)
   workflow_dispatch:
 
 jobs:

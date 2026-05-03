@@ -1,8 +1,15 @@
-name: Score Calls (every 15 min)
+name: Score Calls (business hours every 15 min, off-hours hourly)
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    # Optimized 2026-05-03 from '*/15 * * * *' (96 runs/day) to ~69 runs/day.
+    # VAs work 8am-9pm ET (= 12:00-02:00 UTC EDT, 13:00-02:00 UTC EST).
+    # Window 12:00-02:00 UTC covers EDT perfectly + buffers for EST.
+    # Off-hours hourly sweep catches any straggler recordings.
+    # To revert: replace all 3 lines with '*/15 * * * *'
+    - cron: '*/15 12-23 * * *'  # business hours, every 15 min (UTC 12:00-23:59)
+    - cron: '*/15 0-2 * * *'    # business hours, every 15 min (UTC 00:00-02:59)
+    - cron: '0 3-11 * * *'      # off-hours sweep, hourly (UTC 03:00-11:59)
   workflow_dispatch:
 
 jobs:

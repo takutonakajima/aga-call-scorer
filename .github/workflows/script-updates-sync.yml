@@ -2,8 +2,12 @@ name: script_updates_sync.py
 
 on:
   schedule:
-    # Every 5 minutes
-    - cron: '*/5 * * * *'
+    # Every 15 minutes, 24/7. Optimized 2026-05-03 from every 5 min (-67% runs).
+    # Sophia/Mai post ACTION updates a few times/week — 5 min granularity was
+    # overkill. 15 min is still well below the call center site's own 5-min
+    # auto-refresh cadence, so user-perceived latency is unchanged.
+    # To revert: change to '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:

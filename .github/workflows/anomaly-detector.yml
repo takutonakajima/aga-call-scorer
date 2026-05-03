@@ -2,7 +2,12 @@ name: anomaly_detector.py
 
 on:
   schedule:
-    - cron: '15 * * * *'
+    # Optimized 2026-05-03 from '15 * * * *' (24 runs/day) to ~15 runs/day.
+    # Detects coaching anomalies (voicemail walls, low connect rate, etc.).
+    # No reps work outside 8am-9pm ET, so off-hours runs would always be empty.
+    # To revert: replace both lines with '15 * * * *'
+    - cron: '15 12-23 * * *'  # business hours, every hour at :15 (UTC 12:00-23:59)
+    - cron: '15 0-2 * * *'    # business hours, every hour at :15 (UTC 00:00-02:59)
   workflow_dispatch:
 
 jobs:
