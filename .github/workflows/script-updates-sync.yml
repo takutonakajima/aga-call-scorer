@@ -2,28 +2,34 @@ name: script_updates_sync.py
 
 on:
   schedule:
-    # Every 15 minutes, 24/7. Optimized 2026-05-03 from every 5 min (-67% runs).
-    # Sophia/Mai post ACTION updates a few times/week — 5 min granularity was
-    # overkill. 15 min is still well below the call center site's own 5-min
-    # auto-refresh cadence, so user-perceived latency is unchanged.
-    # To revert: change to '*/5 * * * *'
+    # Make.com scenario 4954893 triggers workflow_dispatch every 5 min (business hours).
+    # This cron is a fallback safety net that runs every 15 min 24/7.
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install deps
+        # cryptography is needed only for Google Sheets JWT (metadata writes).
+        # If GOOGLE_SHEETS_KEY is not set the script skips Sheets entirely — no crash.
         run: pip install --quiet cryptography
       - name: Run
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          # Netlify — required. Add these two secrets in GitHub repo settings:
+          #   NETLIFY_TOKEN    = nfp_TW3wxCv4vsswfzFBVwwZmMzT5j5tWSUde6e8
+          #   NETLIFY_SITE_ID  = 972558c1-0f0f-47a4-b737-b8084e4c1c4d
+          NETLIFY_TOKEN: ${{ secrets.NETLIFY_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          # Google Sheets — optional. Only needed to keep offer metadata (active/price/URLs)
+          # in sync. Q&A now lives in HARDCODED and does NOT use this path.
           GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
           SCRIPT_SYNC_STATE_GET: ${{ secrets.SCRIPT_SYNC_STATE_GET }}
           SCRIPT_SYNC_STATE_SET: ${{ secrets.SCRIPT_SYNC_STATE_SET }}
