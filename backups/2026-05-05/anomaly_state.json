@@ -1,0 +1,67 @@
+[
+  {
+    "rep": "Sarah",
+    "pattern": "LOW_CONNECT_RATE",
+    "alerted_date": "2026-05-04"
+  },
+  {
+    "rep": "Julie",
+    "pattern": "LOW_CONNECT_RATE",
+    "alerted_date": "2026-05-04"
+  },
+  {
+    "rep": "Chris",
+    "pattern": "LONG_GAP",
+    "alerted_date": "2026-05-01"
+  },
+  {
+    "rep": "Julie",
+    "pattern": "NO_CONVERSATIONS",
+    "alerted_date": "2026-05-02"
+  },
+  {
+    "rep": "Julie",
+    "pattern": "VOICEMAIL_WALL",
+    "alerted_date": "2026-05-04"
+  },
+  {
+    "rep": "Chris",
+    "pattern": "NO_CONVERSATIONS",
+    "alerted_date": "2026-05-02"
+  },
+  {
+    "rep": "_HEALTH",
+    "pattern": "CALL_SCORER",
+    "alerted_date": "2026-05-04"
+  },
+  {
+    "rep": "_HEALTH",
+    "pattern": "DIAL_TRACKER",
+    "alerted_date": "2026-05-04"
+  },
+  {
+    "rep": "Sarah",
+    "pattern": "VOICEMAIL_WALL",
+    "alerted_date": "2026-05-04"
+  },
+  {
+    "rep": "Chris",
+    "pattern": "LOW_CONNECT_RATE",
+    "alerted_date": "2026-05-02"
+  },
+  {
+    "rep": "Chris",
+    "pattern": "VOICEMAIL_WALL",
+    "alerted_date": "2026-05-02"
+  },
+  {
+    "rep": "_HEALTH",
+    "pattern": "WEEKLY_TIPS",
+    "alerted_date": "2026-05-04"
+  },
+  {
+    "rep": "_HEALTH",
+    "pattern": "TOP_CALL",
+    "alerted_date": "2026-05-04"
+  }
+]
