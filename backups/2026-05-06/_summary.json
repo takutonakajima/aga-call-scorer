@@ -1,0 +1,13 @@
+{
+  "snapshot_date": "2026-05-06",
+  "snapshot_at_utc": "2026-05-06T06:33:02.468119+00:00",
+  "counts": {
+    "call_scores": "ERROR: Expecting value: line 1 column 1 (char 0)",
+    "bookings": "ERROR: Expecting value: line 1 column 1 (char 0)",
+    "daily_dials": "ERROR: Expecting value: line 1 column 1 (char 0)",
+    "weekly_tips": "ERROR: Expecting value: line 1 column 1 (char 0)",
+    "top_calls": "ERROR: Expecting value: line 1 column 1 (char 0)",
+    "shift_overrides": "ERROR: Expecting value: line 1 column 1 (char 0)",
+    "anomaly_state": "ERROR: Expecting value: line 1 column 1 (char 0)"
+  }
+}
