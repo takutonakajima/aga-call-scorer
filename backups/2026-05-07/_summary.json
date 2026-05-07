@@ -1,0 +1,13 @@
+{
+  "snapshot_date": "2026-05-07",
+  "snapshot_at_utc": "2026-05-07T06:40:27.974890+00:00",
+  "counts": {
+    "call_scores": 120,
+    "bookings": 228,
+    "daily_dials": 32,
+    "weekly_tips": 5,
+    "top_calls": 1,
+    "shift_overrides": 1,
+    "anomaly_state": 14
+  }
+}
