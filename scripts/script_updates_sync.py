@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 """
-AGA #script-updates → HARDCODED + Netlify sync  (v2 — no Google Sheets for Q&A)
+AGA #script-updates ‚Üí HARDCODED + Netlify sync  (v2 ‚Äî no Google Sheets for Q&A)
 
 How it works:
   1. Polls Slack #script-updates for new ACTION: posts from Sophia.
   2. Parses each post (clinic, offer, Q&A, metadata).
   3. Downloads the current index.html from Netlify (the source of truth).
   4. Applies all changes directly to the HARDCODED JSON inside index.html:
-       - New clinic  → creates a new entry in HARDCODED
-       - New offer   → appends to the clinic's offers array
-       - Q&A update  → writes parsed Q-A pairs directly as JSON objects
-       - Metadata    → updates deposit, CRM URL, ops notes, etc.
+       - New clinic  ‚Üí creates a new entry in HARDCODED
+       - New offer   ‚Üí appends to the clinic's offers array
+       - Q&A update  ‚Üí writes parsed Q-A pairs directly as JSON objects
+       - Metadata    ‚Üí updates deposit, CRM URL, ops notes, etc.
   5. Deploys the modified index.html to Netlify (2-step manifest upload).
   6. Also writes offer metadata (NOT Q&A) to Google Sheet so the portal's
      active/inactive logic continues to work.
   7. DMs Sophia on Slack confirming the update is live.
 
 Why this is reliable:
-  - Q&A is stored as structured JSON in HARDCODED — no flat-string encoding,
+  - Q&A is stored as structured JSON in HARDCODED ‚Äî no flat-string encoding,
     no parseFAQ round-trip, no fuzzy offer matching needed.
-  - One deploy per run batch — if 3 posts come in, we apply all 3 then deploy once.
+  - One deploy per run batch ‚Äî if 3 posts come in, we apply all 3 then deploy once.
   - If Netlify deploy fails, the script errors loudly and Sophia gets a DM.
   - The Google Sheet is still updated for offer visibility (active=YES/NO,
     price, URLs) but is no longer involved in Q&A at all.
 
 New GitHub Actions secrets required:
-  NETLIFY_TOKEN    — nfp_TW3wxCv4vsswfzFBVwwZmMzT5j5tWSUde6e8
-  NETLIFY_SITE_ID  — 972558c1-0f0f-47a4-b737-b8084e4c1c4d
+  NETLIFY_TOKEN    ‚Äî nfp_TW3wxCv4vsswfzFBVwwZmMzT5j5tWSUde6e8
+  NETLIFY_SITE_ID  ‚Äî 972558c1-0f0f-47a4-b737-b8084e4c1c4d
 
 Existing secrets still used:
   SLACK_BOT_TOKEN, SCRIPT_SYNC_STATE_GET, SCRIPT_SYNC_STATE_SET,
@@ -44,7 +44,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# ‚îÄ‚îÄ Config ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 SLACK_BOT_TOKEN      = os.environ.get("SLACK_BOT_TOKEN", "")
 NETLIFY_TOKEN        = os.environ.get("NETLIFY_TOKEN", "")
 NETLIFY_SITE_ID      = os.environ.get("NETLIFY_SITE_ID", "")
@@ -62,7 +62,7 @@ CLINICS_TAB    = "clinics"
 
 DEFAULT_GOLDEN_RULE = (
     "DO NOT ask them to book until you've explained the promotion, the price, "
-    "and answered ALL questions. Once you have answered all their concerns — "
+    "and answered ALL questions. Once you have answered all their concerns ‚Äî "
     "THEN book. You MUST explain the card on file / deposit rule word for word "
     "when booking."
 )
@@ -74,7 +74,7 @@ def log(msg):
     print(f"[{datetime.now().isoformat(timespec='seconds')}] {msg}", flush=True)
 
 
-# ── Slack helpers ──────────────────────────────────────────────────────────────
+# ‚îÄ‚îÄ Slack helpers ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 def slack_call(method, params=None, post=False):
     url = f"https://slack.com/api/{method}"
     headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
@@ -114,7 +114,7 @@ def slack_dm(user_id, text):
         log(f"  Slack DM failed: {e}")
 
 
-# ── State (last-processed message ts) ─────────────────────────────────────────
+# ‚îÄ‚îÄ State (last-processed message ts) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 def get_last_ts():
     if not SCRIPT_SYNC_STATE_GET:
         return f"{time.time() - 1800:.6f}"
@@ -141,7 +141,7 @@ def set_last_ts(ts):
         log(f"  State set failed: {e}")
 
 
-# ── Parser ─────────────────────────────────────────────────────────────────────
+# ‚îÄ‚îÄ Parser ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 FIELD_RE = re.compile(
     r"^(ACTION|CLINIC|OFFER\s+NAME|PRICE|LANDING\s+PAGE|BOOKING\s+PAGE|DEPOSIT|"
     r"CRM\s+LINK|CRM\s+LOGIN|CRM\s+PASSWORD|NOTES|MACHINES|GOLDEN\s+RULE|FAQ)\s*:",
@@ -161,7 +161,7 @@ def clean(v):
     if v.startswith("[") and v.endswith("]"):
         v = v[1:-1].strip()
     elif v.startswith("["):
-        # Unbalanced — strip only the opener
+        # Unbalanced ‚Äî strip only the opener
         v = v[1:].strip()
     # Strip *bold* markers
     v = v.strip("*").strip()
@@ -173,13 +173,13 @@ def faq_to_qanda(faq_block):
     Parse Sophia's multi-line FAQ block into [{"q": ..., "a": ...}, ...].
 
     Handles all observed format variants:
-      Q: [question]            — standard
-      Q: [*question*]          — bold markers inside
-      *Q: [question]*          — bold markers outside
-      Q; [question]            — semicolon typo
-      Q: [*1. question*]       — numbered prefix
-      A : [answer]             — space before colon
-      A: multi-line\\ncontinued — answer spans multiple lines
+      Q: [question]            ‚Äî standard
+      Q: [*question*]          ‚Äî bold markers inside
+      *Q: [question]*          ‚Äî bold markers outside
+      Q; [question]            ‚Äî semicolon typo
+      Q: [*1. question*]       ‚Äî numbered prefix
+      A : [answer]             ‚Äî space before colon
+      A: multi-line\\ncontinued ‚Äî answer spans multiple lines
     """
     if not faq_block or not faq_block.strip():
         return []
@@ -276,8 +276,8 @@ def parse_action_post(text):
         "machines":     clean(fields.get("MACHINES", "")),
         "golden_rule":  clean(fields.get("GOLDEN_RULE", "")),
         "ops_notes":    clean(fields.get("NOTES", "")),
-        "faq_raw":      faq_raw,         # raw block → used for HARDCODED qanda
-        "faq":          _faq_to_cell(faq_raw),  # flat string → used for Sheet fallback
+        "faq_raw":      faq_raw,         # raw block ‚Üí used for HARDCODED qanda
+        "faq":          _faq_to_cell(faq_raw),  # flat string ‚Üí used for Sheet fallback
     }
 
 
@@ -286,12 +286,12 @@ def _faq_to_cell(faq_raw):
     qanda = faq_to_qanda(faq_raw)
     parts = []
     for item in qanda:
-        a_safe = item["a"].replace("||", "/").replace(" | ", " — ")
+        a_safe = item["a"].replace("||", "/").replace(" | ", " ‚Äî ")
         parts.append(f"Q: {item['q']} | A: {a_safe}")
     return " || ".join(parts)
 
 
-# ── HARDCODED update ───────────────────────────────────────────────────────────
+# ‚îÄ‚îÄ HARDCODED update ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 def norm(s):
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
@@ -330,7 +330,7 @@ def apply_to_hardcoded(data, parsed):
     offer_name  = parsed["offer_name"]
     changed     = []
 
-    # ── Find or create clinic ──────────────────────────────────────────────
+    # ‚îÄ‚îÄ Find or create clinic ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     clinic = next((c for c in data if norm(c.get("name", "")) == norm(clinic_name)), None)
     if clinic is None:
         clinic_id = re.sub(r"[^a-z0-9]+", "-", clinic_name.lower()).strip("-")
@@ -345,10 +345,10 @@ def apply_to_hardcoded(data, parsed):
             "crmUrl": "", "crmLogin": "", "crmPassword": "", "machines": "",
         }
         data.append(clinic)
-        log(f"    → New clinic created: {clinic_name}")
+        log(f"    ‚Üí New clinic created: {clinic_name}")
         changed.append("new-clinic")
 
-    # ── Update clinic-level metadata ───────────────────────────────────────
+    # ‚îÄ‚îÄ Update clinic-level metadata ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     if parsed.get("deposit"):
         dep_m = re.search(r"\d+", parsed["deposit"])
         if dep_m:
@@ -370,9 +370,9 @@ def apply_to_hardcoded(data, parsed):
             changed.append("opsNotes")
 
     if not offer_name:
-        return f"{clinic_name}: clinic metadata → {', '.join(changed) or 'no changes'}"
+        return f"{clinic_name}: clinic metadata ‚Üí {', '.join(changed) or 'no changes'}"
 
-    # ── Find or create offer (exact match — no fuzzy) ──────────────────────
+    # ‚îÄ‚îÄ Find or create offer (exact match ‚Äî no fuzzy) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     offer = next(
         (o for o in clinic.get("offers", []) if norm(o.get("name", "")) == norm(offer_name)),
         None
@@ -386,17 +386,17 @@ def apply_to_hardcoded(data, parsed):
             "googleSheet": "", "qanda": [],
         }
         clinic.setdefault("offers", []).append(offer)
-        log(f"    → New offer created: {offer_name}")
+        log(f"    ‚Üí New offer created: {offer_name}")
         changed.append("new-offer")
 
-    # ── Update offer metadata ──────────────────────────────────────────────
+    # ‚îÄ‚îÄ Update offer metadata ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     for field, key in [("price", "price"), ("landing_page", "landingPage"),
                         ("booking_page", "depositPage")]:
         if parsed.get(field):
             offer[key] = parsed[field]
             changed.append(key)
 
-    # ── Write Q&A directly as structured JSON ─────────────────────────────
+    # ‚îÄ‚îÄ Write Q&A directly as structured JSON ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     qanda = faq_to_qanda(parsed.get("faq_raw", ""))
     if qanda:
         offer["qanda"] = qanda
@@ -405,20 +405,245 @@ def apply_to_hardcoded(data, parsed):
     return f"{clinic_name} / {offer_name}: {', '.join(changed) or 'no changes'}"
 
 
-# ── Netlify deploy ─────────────────────────────────────────────────────────────
+# ‚îÄ‚îÄ Netlify deploy (gate-aware ‚Äî added 2026-05-09 to preserve auth gate) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+# CRITICAL: this MUST upload index.html + netlify.toml + gate function together,
+# or each deploy will WIPE the gate and re-expose CRM passwords in page source.
+# Sync source-of-truth: AGA HQ/aga-call-portal/{netlify.toml, netlify/functions/gate.js}.
+# When updating those files, also update the GATE_JS / NETLIFY_TOML constants below.
+
+NETLIFY_TOML = """[build]
+  publish = "."
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["index.html"]
+
+# Force EVERY path through the gate function. The static index.html still
+# ships in the deploy (so the function can read it), but no path is reachable
+# directly because of force=true.
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/gate"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Cache-Control = "no-store"
+"""
+
+GATE_JS = """// Call Portal Auth Gate (Netlify Function ‚Äî Node.js)
+// Intercepts every path. Without a valid auth cookie, serves a login page.
+// On valid passcode submission to /__login, sets an HttpOnly Secure cookie.
+// Env var required: PORTAL_PASSCODE  (set in Netlify ‚Üí Site ‚Üí Environment)
+//
+// Cookie value is HMAC-SHA256(passcode, salt) ‚Äî NOT the passcode itself,
+// so a leaked cookie can't be reversed back to the passcode.
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const COOKIE_NAME = 'portal_auth';
+const COOKIE_MAX_AGE = 60 * 60 * 12; // 12 hours
+const HMAC_SALT = 'aga-portal-v1';
+
+// Cache the portal HTML in module scope (read once per cold start).
+let _portalHtml = null;
+function loadPortalHtml() {
+  if (_portalHtml !== null) return _portalHtml;
+  // included_files in netlify.toml ships index.html alongside the function bundle.
+  // Try several plausible paths because Netlify's bundle layout varies.
+  const candidates = [
+    path.join(__dirname, 'index.html'),
+    path.join(__dirname, '..', '..', 'index.html'),
+    path.join(process.env.LAMBDA_TASK_ROOT || '', 'index.html'),
+    path.join(process.cwd(), 'index.html'),
+  ];
+  for (const p of candidates) {
+    try {
+      if (p && fs.existsSync(p)) {
+        _portalHtml = fs.readFileSync(p, 'utf8');
+        return _portalHtml;
+      }
+    } catch (_) { /* keep trying */ }
+  }
+  _portalHtml = '';
+  return _portalHtml;
+}
+
+function expectedToken(passcode) {
+  return crypto.createHmac('sha256', passcode).update(HMAC_SALT).digest('hex');
+}
+
+function timingSafeEqual(a, b) {
+  const ab = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 0) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k) out[k] = v;
+  }
+  return out;
+}
+
+function parseFormBody(body, isBase64) {
+  const text = isBase64 ? Buffer.from(body || '', 'base64').toString('utf8') : (body || '');
+  const out = {};
+  for (const pair of text.split('&')) {
+    const idx = pair.indexOf('=');
+    if (idx < 0) continue;
+    const k = decodeURIComponent(pair.slice(0, idx).replace(/\+/g, ' '));
+    const v = decodeURIComponent(pair.slice(idx + 1).replace(/\+/g, ' '));
+    out[k] = v;
+  }
+  return out;
+}
+
+function loginPage(showError) {
+  const errStyle = showError ? '' : 'display:none;';
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AGA Call Portal ‚Äî Sign In</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+       background:#0e1014;color:#fff;min-height:100vh;display:grid;place-items:center}
+  .card{background:#181b22;border:1px solid #2a2e38;border-radius:14px;padding:32px;width:340px;
+        box-shadow:0 20px 60px rgba(0,0,0,.45)}
+  h1{margin:0 0 6px;font-size:20px;letter-spacing:.2px}
+  p{margin:0 0 20px;color:#9aa0ab;font-size:13.5px}
+  input{width:100%;padding:12px 14px;border-radius:8px;border:1px solid #2a2e38;
+        background:#0e1014;color:#fff;font-size:15px;outline:none}
+  input:focus{border-color:#4f8df9}
+  button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:8px;
+         background:#4f8df9;color:#fff;font-weight:600;font-size:15px;cursor:pointer}
+  button:hover{background:#3b7be8}
+  .err{margin-top:12px;color:#ff6b6b;font-size:13px;${errStyle}}
+</style></head>
+<body>
+  <form class="card" method="POST" action="/__login" autocomplete="off">
+    <h1>AGA Call Portal</h1>
+    <p>Enter the access code to continue.</p>
+    <input type="password" name="passcode" placeholder="Passcode" autofocus required>
+    <button type="submit">Sign In</button>
+    <div class="err">Incorrect passcode. Try again.</div>
+  </form>
+</body></html>`;
+}
+
+function htmlResponse(body, status, extraHeaders) {
+  return {
+    statusCode: status,
+    headers: Object.assign({
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+    }, extraHeaders || {}),
+    body,
+  };
+}
+
+exports.handler = async (event) => {
+  const passcode = process.env.PORTAL_PASSCODE;
+  if (!passcode) {
+    return { statusCode: 500, headers: { 'Content-Type': 'text/plain' }, body: 'PORTAL_PASSCODE env var not configured' };
+  }
+
+  const validToken = expectedToken(passcode);
+  const rawPath = event.path || '/';
+
+  // ‚îÄ‚îÄ Login submission ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+  if (rawPath === '/__login' && event.httpMethod === 'POST') {
+    const form = parseFormBody(event.body, event.isBase64Encoded);
+    const submitted = String(form.passcode || '');
+    if (submitted && timingSafeEqual(submitted, passcode)) {
+      return {
+        statusCode: 303,
+        headers: {
+          'Location': '/',
+          'Set-Cookie': `${COOKIE_NAME}=${validToken}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Strict`,
+          'Cache-Control': 'no-store',
+        },
+        body: '',
+      };
+    }
+    return htmlResponse(loginPage(true), 401);
+  }
+
+  // ‚îÄ‚îÄ Logout ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+  if (rawPath === '/__logout') {
+    return {
+      statusCode: 303,
+      headers: {
+        'Location': '/',
+        'Set-Cookie': `${COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`,
+        'Cache-Control': 'no-store',
+      },
+      body: '',
+    };
+  }
+
+  // ‚îÄ‚îÄ Auth check on every other request ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+  const cookies = parseCookies(event.headers.cookie || event.headers.Cookie);
+  const token = cookies[COOKIE_NAME] || '';
+  const authed = token && timingSafeEqual(token, validToken);
+
+  if (!authed) {
+    return htmlResponse(loginPage(false), 200);
+  }
+
+  const html = loadPortalHtml();
+  if (!html) {
+    return { statusCode: 500, headers: { 'Content-Type': 'text/plain' }, body: 'Portal HTML not found in function bundle' };
+  }
+  return htmlResponse(html, 200);
+};
+"""
+
+
 def netlify_deploy(html_content):
     """
-    Two-step Netlify manifest deploy.
-      1. POST /deploys with SHA1 digest of index.html
-      2. PUT file content if Netlify doesn't already have it cached
-      3. Poll until state=ready
-    Returns the live URL on success; raises RuntimeError on failure.
+    Netlify File Digest deploy ‚Äî uploads index.html + netlify.toml + gate function.
+    The gate function preserves the passcode auth that protects CRM credentials.
     """
     if not NETLIFY_TOKEN or not NETLIFY_SITE_ID:
         raise RuntimeError("NETLIFY_TOKEN or NETLIFY_SITE_ID not set")
 
+    import io, zipfile
+
     html_bytes = html_content.encode("utf-8") if isinstance(html_content, str) else html_content
-    sha1 = hashlib.sha1(html_bytes).hexdigest()
+    toml_bytes = NETLIFY_TOML.encode("utf-8")
+
+    # Function bundle: zip of gate.js + index.html (function reads index.html via fs)
+    fn_buf = io.BytesIO()
+    with zipfile.ZipFile(fn_buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("gate.js", GATE_JS)
+        z.writestr("index.html", html_bytes)
+    fn_zip = fn_buf.getvalue()
+
+    file_shas = {
+        "/index.html":   hashlib.sha1(html_bytes).hexdigest(),
+        "/netlify.toml": hashlib.sha1(toml_bytes).hexdigest(),
+    }
+    fn_sha = hashlib.sha256(fn_zip).hexdigest()
 
     def netlify_req(method, path, data=None, content_type="application/json"):
         url = f"https://api.netlify.com/api/v1{path}"
@@ -428,42 +653,58 @@ def netlify_deploy(html_content):
                      "Content-Type": content_type}
         )
         with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read())
+            body = r.read()
+            return json.loads(body) if body else {{}}
 
-    # Step 1: Create deploy with file manifest
+    # Step 1: Create deploy with full manifest (files + functions)
     deploy = netlify_req(
         "POST", f"/sites/{NETLIFY_SITE_ID}/deploys",
-        data=json.dumps({"files": {"/index.html": sha1}}).encode(),
+        data=json.dumps({{
+            "files": file_shas,
+            "functions": {{"gate": fn_sha}},
+        }}).encode(),
     )
     deploy_id = deploy["id"]
-    required  = deploy.get("required", [])
-    log(f"  Netlify deploy {deploy_id} created (required={required})")
+    required_files = deploy.get("required", [])
+    required_fns   = deploy.get("required_functions", [])
+    log(f"  Netlify deploy {deploy_id} (req files={len(required_files)} req fns={len(required_fns)})")
 
-    # Step 2: Upload file if Netlify doesn't have it cached
-    if sha1 in required:
-        log("  Uploading index.html …")
+    # Step 2: Upload required static files
+    sha_to_path = {{s: p for p, s in file_shas.items()}}
+    for sha in required_files:
+        rel = sha_to_path[sha]
+        body = html_bytes if rel == "/index.html" else toml_bytes
         netlify_req(
-            "PUT", f"/deploys/{deploy_id}/files/index.html",
-            data=html_bytes, content_type="application/octet-stream",
+            "PUT", f"/deploys/{deploy_id}/files{rel}",
+            data=body, content_type="application/octet-stream",
         )
 
-    # Step 3: Wait for ready (up to 60 s)
+    # Step 3: Upload function (note ?runtime=js is required by Netlify API)
+    if fn_sha in required_fns:
+        log("  Uploading gate function ‚Ä¶")
+        netlify_req(
+            "PUT", f"/deploys/{deploy_id}/functions/gate?runtime=js",
+            data=fn_zip, content_type="application/zip",
+        )
+
+    # Step 4: Wait for ready
     for attempt in range(20):
         time.sleep(3)
         status = netlify_req("GET", f"/deploys/{deploy_id}")
         state  = status.get("state")
         if state == "ready":
             live_url = status.get("ssl_url") or NETLIFY_SITE_URL
-            log(f"  Netlify deploy ready → {live_url}")
+            log(f"  Netlify deploy ready ‚Üí {live_url}")
             return live_url
         if state in ("error", "failed"):
             raise RuntimeError(f"Netlify deploy {deploy_id} failed: state={state}")
-        log(f"  Waiting for Netlify … state={state} (attempt {attempt+1}/20)")
+        log(f"  Waiting for Netlify ‚Ä¶ state={state} (attempt {attempt+1}/20)")
 
     raise RuntimeError(f"Netlify deploy {deploy_id} timed out")
 
 
-# ── Google Sheets — metadata only (no Q&A) ────────────────────────────────────
+
+# ‚îÄ‚îÄ Google Sheets ‚Äî metadata only (no Q&A) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 def _load_sa():
     raw = GOOGLE_SHEETS_KEY.strip()
     if not raw:
@@ -556,7 +797,7 @@ def sync_offer_metadata(token, parsed):
     # Set active=YES for new ADD rows (leave existing active status alone on UPDATE)
     if not target and parsed["action"] == "ADD" and "active" in idx:
         new_row[idx["active"]] = "YES"
-    # NOTE: intentionally NOT writing "faq" column — Q&A lives in HARDCODED now
+    # NOTE: intentionally NOT writing "faq" column ‚Äî Q&A lives in HARDCODED now
 
     rng = f"{OFFERS_TAB}!A{target}:{chr(ord('A') + len(headers) - 1)}{target}" if target \
           else f"{OFFERS_TAB}!A1"
@@ -607,7 +848,7 @@ def sync_clinic_metadata(token, parsed):
     setv("machines",     parsed["machines"])
     setv("golden_rule",  parsed["golden_rule"])
     setv("ops_notes",    parsed["ops_notes"])
-    # NOTE: clinic-level FAQ is also skipped — HARDCODED is the source of truth
+    # NOTE: clinic-level FAQ is also skipped ‚Äî HARDCODED is the source of truth
 
     rng = f"{CLINICS_TAB}!A{target}:{chr(ord('A') + len(headers) - 1)}{target}" if target \
           else f"{CLINICS_TAB}!A1"
@@ -618,18 +859,18 @@ def sync_clinic_metadata(token, parsed):
     return f"{'updated' if target else 'appended'} clinics row"
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ‚îÄ‚îÄ Main ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 def main():
     log("=== Script-Updates Sync v2 ===")
 
     if not SLACK_BOT_TOKEN:
-        log("SLACK_BOT_TOKEN missing — cannot poll Slack. Exiting.")
+        log("SLACK_BOT_TOKEN missing ‚Äî cannot poll Slack. Exiting.")
         sys.exit(1)
     if not NETLIFY_TOKEN or not NETLIFY_SITE_ID:
-        log("NETLIFY_TOKEN or NETLIFY_SITE_ID missing — cannot deploy. Exiting.")
+        log("NETLIFY_TOKEN or NETLIFY_SITE_ID missing ‚Äî cannot deploy. Exiting.")
         sys.exit(1)
 
-    # ── 1. Fetch new Slack messages ──────────────────────────────────────────
+    # ‚îÄ‚îÄ 1. Fetch new Slack messages ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     last_ts = get_last_ts()
     log(f"  Polling since ts={last_ts}")
     msgs = fetch_messages_since(last_ts)
@@ -658,34 +899,34 @@ def main():
         set_last_ts(latest_ts)
         return
 
-    # ── 2. Load current index.html and extract HARDCODED ────────────────────
-    log("  Fetching index.html from Netlify …")
+    # ‚îÄ‚îÄ 2. Load current index.html and extract HARDCODED ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+    log("  Fetching index.html from Netlify ‚Ä¶")
     html    = fetch_portal_html()
     hc_data, hc_match = extract_hardcoded(html)
     log(f"  Loaded HARDCODED with {len(hc_data)} clinics")
 
-    # ── 3. Apply all changes to HARDCODED in memory ──────────────────────────
+    # ‚îÄ‚îÄ 3. Apply all changes to HARDCODED in memory ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     hardcoded_changes = []
     for p in action_posts:
         desc = apply_to_hardcoded(hc_data, p)
         hardcoded_changes.append(desc)
         log(f"  HARDCODED: {desc}")
 
-    # ── 4. Rebuild index.html with updated HARDCODED ─────────────────────────
+    # ‚îÄ‚îÄ 4. Rebuild index.html with updated HARDCODED ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     new_html = replace_hardcoded(html, hc_match, hc_data)
 
-    # ── 5. Deploy to Netlify ─────────────────────────────────────────────────
-    log("  Deploying to Netlify …")
+    # ‚îÄ‚îÄ 5. Deploy to Netlify ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
+    log("  Deploying to Netlify ‚Ä¶")
     try:
         live_url = netlify_deploy(new_html)
     except Exception as e:
         log(f"  NETLIFY DEPLOY FAILED: {e}")
         slack_dm(SOPHIA_USER_ID,
-                 f"⚠️ Script update received but *Netlify deploy failed*: `{e}`\n"
+                 f"‚ö†Ô∏è Script update received but *Netlify deploy failed*: `{e}`\n"
                  f"Changes will be retried on the next sync run.")
         sys.exit(1)
 
-    # ── 6. Update Google Sheet metadata (non-FAQ fields only) ────────────────
+    # ‚îÄ‚îÄ 6. Update Google Sheet metadata (non-FAQ fields only) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     sheet_token = None
     if GOOGLE_SHEETS_KEY:
         try:
@@ -703,14 +944,14 @@ def main():
                 log(f"  Sheet metadata write failed (non-fatal): {e}")
             time.sleep(0.4)
 
-    # ── 7. Save state and notify Sophia ──────────────────────────────────────
+    # ‚îÄ‚îÄ 7. Save state and notify Sophia ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     set_last_ts(latest_ts)
 
     n = len(action_posts)
-    summary = "\n".join(f"  • {d}" for d in hardcoded_changes)
+    summary = "\n".join(f"  ‚Ä¢ {d}" for d in hardcoded_changes)
     slack_dm(
         SOPHIA_USER_ID,
-        f"✅ *{n} script update{'s' if n > 1 else ''} applied and live* at "
+        f"‚úÖ *{n} script update{'s' if n > 1 else ''} applied and live* at "
         f"<{live_url}|agacallcenter.netlify.app>\n{summary}"
     )
     log(f"Done. Applied {n} update(s), deployed to Netlify.")
