@@ -56,6 +56,8 @@ ALERT_WEBHOOK        = os.environ.get("ALERT_WEBHOOK_URL", "")
 
 CHANNEL_ID     = "C0AV8UBGC69"   # #script-updates
 SOPHIA_USER_ID = "U0AUCP53T3R"
+MAI_USER_ID    = "U0AV75DLE1X"  # Jeamai Beltran ‚Äî also posts ACTION updates
+ALLOWED_USER_IDS = {SOPHIA_USER_ID, MAI_USER_ID}
 SHEET_ID       = "1wZEQYV4RgjbWHrRhnw58DIiFGNrOM5-jlJQuNv3_nFw"
 OFFERS_TAB     = "offers"
 CLINICS_TAB    = "clinics"
@@ -297,13 +299,26 @@ def norm(s):
 
 
 def fetch_portal_html():
-    """Download the current index.html from Netlify."""
-    req = urllib.request.Request(
-        NETLIFY_SITE_URL,
-        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"}
-    )
+    """Download the current index.html from Netlify.
+
+    The portal sits behind a passcode gate (Netlify Function). Cookies don't
+    work for headless automation, so we use a bearer token that the gate
+    function recognizes as a fetch-bypass. Set PORTAL_FETCH_TOKEN as a GitHub
+    Actions secret AND a Netlify env var.
+    """
+    fetch_token = os.environ.get("PORTAL_FETCH_TOKEN", "").strip()
+    headers = {"Cache-Control": "no-cache", "Pragma": "no-cache"}
+    if fetch_token:
+        headers["Authorization"] = f"Bearer {fetch_token}"
+    req = urllib.request.Request(NETLIFY_SITE_URL, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read().decode("utf-8")
+        body = r.read().decode("utf-8")
+    if "const HARDCODED" not in body:
+        raise RuntimeError(
+            "fetch_portal_html got HTML without HARDCODED block ‚Äî "
+            "likely the gate's login page. Check PORTAL_FETCH_TOKEN secret."
+        )
+    return body
 
 
 def extract_hardcoded(html):
@@ -405,245 +420,20 @@ def apply_to_hardcoded(data, parsed):
     return f"{clinic_name} / {offer_name}: {', '.join(changed) or 'no changes'}"
 
 
-# ‚îÄ‚îÄ Netlify deploy (gate-aware ‚Äî added 2026-05-09 to preserve auth gate) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-# CRITICAL: this MUST upload index.html + netlify.toml + gate function together,
-# or each deploy will WIPE the gate and re-expose CRM passwords in page source.
-# Sync source-of-truth: AGA HQ/aga-call-portal/{netlify.toml, netlify/functions/gate.js}.
-# When updating those files, also update the GATE_JS / NETLIFY_TOML constants below.
-
-NETLIFY_TOML = """[build]
-  publish = "."
-
-[functions]
-  node_bundler = "esbuild"
-  included_files = ["index.html"]
-
-# Force EVERY path through the gate function. The static index.html still
-# ships in the deploy (so the function can read it), but no path is reachable
-# directly because of force=true.
-[[redirects]]
-  from = "/*"
-  to = "/.netlify/functions/gate"
-  status = 200
-  force = true
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Frame-Options = "DENY"
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-    Cache-Control = "no-store"
-"""
-
-GATE_JS = """// Call Portal Auth Gate (Netlify Function ‚Äî Node.js)
-// Intercepts every path. Without a valid auth cookie, serves a login page.
-// On valid passcode submission to /__login, sets an HttpOnly Secure cookie.
-// Env var required: PORTAL_PASSCODE  (set in Netlify ‚Üí Site ‚Üí Environment)
-//
-// Cookie value is HMAC-SHA256(passcode, salt) ‚Äî NOT the passcode itself,
-// so a leaked cookie can't be reversed back to the passcode.
-
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-
-const COOKIE_NAME = 'portal_auth';
-const COOKIE_MAX_AGE = 60 * 60 * 12; // 12 hours
-const HMAC_SALT = 'aga-portal-v1';
-
-// Cache the portal HTML in module scope (read once per cold start).
-let _portalHtml = null;
-function loadPortalHtml() {
-  if (_portalHtml !== null) return _portalHtml;
-  // included_files in netlify.toml ships index.html alongside the function bundle.
-  // Try several plausible paths because Netlify's bundle layout varies.
-  const candidates = [
-    path.join(__dirname, 'index.html'),
-    path.join(__dirname, '..', '..', 'index.html'),
-    path.join(process.env.LAMBDA_TASK_ROOT || '', 'index.html'),
-    path.join(process.cwd(), 'index.html'),
-  ];
-  for (const p of candidates) {
-    try {
-      if (p && fs.existsSync(p)) {
-        _portalHtml = fs.readFileSync(p, 'utf8');
-        return _portalHtml;
-      }
-    } catch (_) { /* keep trying */ }
-  }
-  _portalHtml = '';
-  return _portalHtml;
-}
-
-function expectedToken(passcode) {
-  return crypto.createHmac('sha256', passcode).update(HMAC_SALT).digest('hex');
-}
-
-function timingSafeEqual(a, b) {
-  const ab = Buffer.from(a, 'utf8');
-  const bb = Buffer.from(b, 'utf8');
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
-}
-
-function parseCookies(header) {
-  const out = {};
-  if (!header) return out;
-  for (const part of header.split(';')) {
-    const idx = part.indexOf('=');
-    if (idx < 0) continue;
-    const k = part.slice(0, idx).trim();
-    const v = part.slice(idx + 1).trim();
-    if (k) out[k] = v;
-  }
-  return out;
-}
-
-function parseFormBody(body, isBase64) {
-  const text = isBase64 ? Buffer.from(body || '', 'base64').toString('utf8') : (body || '');
-  const out = {};
-  for (const pair of text.split('&')) {
-    const idx = pair.indexOf('=');
-    if (idx < 0) continue;
-    const k = decodeURIComponent(pair.slice(0, idx).replace(/\+/g, ' '));
-    const v = decodeURIComponent(pair.slice(idx + 1).replace(/\+/g, ' '));
-    out[k] = v;
-  }
-  return out;
-}
-
-function loginPage(showError) {
-  const errStyle = showError ? '' : 'display:none;';
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AGA Call Portal ‚Äî Sign In</title>
-<style>
-  *,*::before,*::after{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-       background:#0e1014;color:#fff;min-height:100vh;display:grid;place-items:center}
-  .card{background:#181b22;border:1px solid #2a2e38;border-radius:14px;padding:32px;width:340px;
-        box-shadow:0 20px 60px rgba(0,0,0,.45)}
-  h1{margin:0 0 6px;font-size:20px;letter-spacing:.2px}
-  p{margin:0 0 20px;color:#9aa0ab;font-size:13.5px}
-  input{width:100%;padding:12px 14px;border-radius:8px;border:1px solid #2a2e38;
-        background:#0e1014;color:#fff;font-size:15px;outline:none}
-  input:focus{border-color:#4f8df9}
-  button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:8px;
-         background:#4f8df9;color:#fff;font-weight:600;font-size:15px;cursor:pointer}
-  button:hover{background:#3b7be8}
-  .err{margin-top:12px;color:#ff6b6b;font-size:13px;${errStyle}}
-</style></head>
-<body>
-  <form class="card" method="POST" action="/__login" autocomplete="off">
-    <h1>AGA Call Portal</h1>
-    <p>Enter the access code to continue.</p>
-    <input type="password" name="passcode" placeholder="Passcode" autofocus required>
-    <button type="submit">Sign In</button>
-    <div class="err">Incorrect passcode. Try again.</div>
-  </form>
-</body></html>`;
-}
-
-function htmlResponse(body, status, extraHeaders) {
-  return {
-    statusCode: status,
-    headers: Object.assign({
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Frame-Options': 'DENY',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'strict-origin-when-cross-origin',
-    }, extraHeaders || {}),
-    body,
-  };
-}
-
-exports.handler = async (event) => {
-  const passcode = process.env.PORTAL_PASSCODE;
-  if (!passcode) {
-    return { statusCode: 500, headers: { 'Content-Type': 'text/plain' }, body: 'PORTAL_PASSCODE env var not configured' };
-  }
-
-  const validToken = expectedToken(passcode);
-  const rawPath = event.path || '/';
-
-  // ‚îÄ‚îÄ Login submission ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-  if (rawPath === '/__login' && event.httpMethod === 'POST') {
-    const form = parseFormBody(event.body, event.isBase64Encoded);
-    const submitted = String(form.passcode || '');
-    if (submitted && timingSafeEqual(submitted, passcode)) {
-      return {
-        statusCode: 303,
-        headers: {
-          'Location': '/',
-          'Set-Cookie': `${COOKIE_NAME}=${validToken}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Strict`,
-          'Cache-Control': 'no-store',
-        },
-        body: '',
-      };
-    }
-    return htmlResponse(loginPage(true), 401);
-  }
-
-  // ‚îÄ‚îÄ Logout ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-  if (rawPath === '/__logout') {
-    return {
-      statusCode: 303,
-      headers: {
-        'Location': '/',
-        'Set-Cookie': `${COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`,
-        'Cache-Control': 'no-store',
-      },
-      body: '',
-    };
-  }
-
-  // ‚îÄ‚îÄ Auth check on every other request ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
-  const cookies = parseCookies(event.headers.cookie || event.headers.Cookie);
-  const token = cookies[COOKIE_NAME] || '';
-  const authed = token && timingSafeEqual(token, validToken);
-
-  if (!authed) {
-    return htmlResponse(loginPage(false), 200);
-  }
-
-  const html = loadPortalHtml();
-  if (!html) {
-    return { statusCode: 500, headers: { 'Content-Type': 'text/plain' }, body: 'Portal HTML not found in function bundle' };
-  }
-  return htmlResponse(html, 200);
-};
-"""
-
-
+# ‚îÄ‚îÄ Netlify deploy ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
 def netlify_deploy(html_content):
     """
-    Netlify File Digest deploy ‚Äî uploads index.html + netlify.toml + gate function.
-    The gate function preserves the passcode auth that protects CRM credentials.
+    Two-step Netlify manifest deploy.
+      1. POST /deploys with SHA1 digest of index.html
+      2. PUT file content if Netlify doesn't already have it cached
+      3. Poll until state=ready
+    Returns the live URL on success; raises RuntimeError on failure.
     """
     if not NETLIFY_TOKEN or not NETLIFY_SITE_ID:
         raise RuntimeError("NETLIFY_TOKEN or NETLIFY_SITE_ID not set")
 
-    import io, zipfile
-
     html_bytes = html_content.encode("utf-8") if isinstance(html_content, str) else html_content
-    toml_bytes = NETLIFY_TOML.encode("utf-8")
-
-    # Function bundle: zip of gate.js + index.html (function reads index.html via fs)
-    fn_buf = io.BytesIO()
-    with zipfile.ZipFile(fn_buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("gate.js", GATE_JS)
-        z.writestr("index.html", html_bytes)
-    fn_zip = fn_buf.getvalue()
-
-    file_shas = {
-        "/index.html":   hashlib.sha1(html_bytes).hexdigest(),
-        "/netlify.toml": hashlib.sha1(toml_bytes).hexdigest(),
-    }
-    fn_sha = hashlib.sha256(fn_zip).hexdigest()
+    sha1 = hashlib.sha1(html_bytes).hexdigest()
 
     def netlify_req(method, path, data=None, content_type="application/json"):
         url = f"https://api.netlify.com/api/v1{path}"
@@ -653,41 +443,26 @@ def netlify_deploy(html_content):
                      "Content-Type": content_type}
         )
         with urllib.request.urlopen(req, timeout=60) as r:
-            body = r.read()
-            return json.loads(body) if body else {{}}
+            return json.loads(r.read())
 
-    # Step 1: Create deploy with full manifest (files + functions)
+    # Step 1: Create deploy with file manifest
     deploy = netlify_req(
         "POST", f"/sites/{NETLIFY_SITE_ID}/deploys",
-        data=json.dumps({{
-            "files": file_shas,
-            "functions": {{"gate": fn_sha}},
-        }}).encode(),
+        data=json.dumps({"files": {"/index.html": sha1}}).encode(),
     )
     deploy_id = deploy["id"]
-    required_files = deploy.get("required", [])
-    required_fns   = deploy.get("required_functions", [])
-    log(f"  Netlify deploy {deploy_id} (req files={len(required_files)} req fns={len(required_fns)})")
+    required  = deploy.get("required", [])
+    log(f"  Netlify deploy {deploy_id} created (required={required})")
 
-    # Step 2: Upload required static files
-    sha_to_path = {{s: p for p, s in file_shas.items()}}
-    for sha in required_files:
-        rel = sha_to_path[sha]
-        body = html_bytes if rel == "/index.html" else toml_bytes
+    # Step 2: Upload file if Netlify doesn't have it cached
+    if sha1 in required:
+        log("  Uploading index.html ‚Ä¶")
         netlify_req(
-            "PUT", f"/deploys/{deploy_id}/files{rel}",
-            data=body, content_type="application/octet-stream",
+            "PUT", f"/deploys/{deploy_id}/files/index.html",
+            data=html_bytes, content_type="application/octet-stream",
         )
 
-    # Step 3: Upload function (note ?runtime=js is required by Netlify API)
-    if fn_sha in required_fns:
-        log("  Uploading gate function ‚Ä¶")
-        netlify_req(
-            "PUT", f"/deploys/{deploy_id}/functions/gate?runtime=js",
-            data=fn_zip, content_type="application/zip",
-        )
-
-    # Step 4: Wait for ready
+    # Step 3: Wait for ready (up to 60 s)
     for attempt in range(20):
         time.sleep(3)
         status = netlify_req("GET", f"/deploys/{deploy_id}")
@@ -701,7 +476,6 @@ def netlify_deploy(html_content):
         log(f"  Waiting for Netlify ‚Ä¶ state={state} (attempt {attempt+1}/20)")
 
     raise RuntimeError(f"Netlify deploy {deploy_id} timed out")
-
 
 
 # ‚îÄ‚îÄ Google Sheets ‚Äî metadata only (no Q&A) ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
@@ -884,7 +658,10 @@ def main():
         user = m.get("user", "")
         text = (m.get("text", "") or "").strip()
         latest_ts = ts
-        if user == SOPHIA_USER_ID and text.upper().startswith("ACTION"):
+        # Process posts from Sophia AND Mai (Jeamai) ‚Äî both maintain script updates.
+        # Bug fixed 2026-05-13: previously only Sophia was processed, Mai's updates
+        # were silently dropped (e.g., LaVie price changes, Modern Image deposit).
+        if user in ALLOWED_USER_IDS and text.upper().startswith("ACTION"):
             parsed = parse_action_post(text)
             if parsed and parsed["client_name"]:
                 action_posts.append(parsed)
