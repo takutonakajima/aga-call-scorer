@@ -22,6 +22,7 @@ jobs:
         run: pip install --quiet cryptography
       - name: Run
         env:
+          PORTAL_FETCH_TOKEN: ${{ secrets.PORTAL_FETCH_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           # Netlify — required. Add these two secrets in GitHub repo settings:
           #   NETLIFY_TOKEN    = nfp_TW3wxCv4vsswfzFBVwwZmMzT5j5tWSUde6e8
