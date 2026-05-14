@@ -56,7 +56,7 @@ ALERT_WEBHOOK        = os.environ.get("ALERT_WEBHOOK_URL", "")
 
 CHANNEL_ID     = "C0AV8UBGC69"   # #script-updates
 SOPHIA_USER_ID = "U0AUCP53T3R"
-MAI_USER_ID    = "U0AV75DLE1X"  # Jeamai Beltran ‚Äî also posts ACTION updates
+MAI_USER_ID    = "U0AV75DLE1X"  # Jeamai Beltran (Mai) — also posts ACTION updates (A2P + assets)
 ALLOWED_USER_IDS = {SOPHIA_USER_ID, MAI_USER_ID}
 SHEET_ID       = "1wZEQYV4RgjbWHrRhnw58DIiFGNrOM5-jlJQuNv3_nFw"
 OFFERS_TAB     = "offers"
@@ -299,25 +299,28 @@ def norm(s):
 
 
 def fetch_portal_html():
-    """Download the current index.html from Netlify.
-
-    The portal sits behind a passcode gate (Netlify Function). Cookies don't
-    work for headless automation, so we use a bearer token that the gate
-    function recognizes as a fetch-bypass. Set PORTAL_FETCH_TOKEN as a GitHub
-    Actions secret AND a Netlify env var.
-    """
+    """Download the current index.html from Netlify, bypassing the passcode gate
+    via PORTAL_FETCH_TOKEN. Without the token the gate returns the ~1.5 KB login
+    page instead of the 270 KB portal — which then crashes extract_hardcoded()."""
     fetch_token = os.environ.get("PORTAL_FETCH_TOKEN", "").strip()
-    headers = {"Cache-Control": "no-cache", "Pragma": "no-cache"}
-    if fetch_token:
-        headers["Authorization"] = f"Bearer {fetch_token}"
-    req = urllib.request.Request(NETLIFY_SITE_URL, headers=headers)
+    if not fetch_token:
+        raise RuntimeError(
+            "PORTAL_FETCH_TOKEN env var missing — gate will return login page instead of portal HTML")
+    headers = {
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        # Send via THREE channels for resilience (Netlify sometimes filters Authorization):
+        "Authorization": f"Bearer {fetch_token}",
+        "X-Portal-Fetch-Token": fetch_token,
+    }
+    url = NETLIFY_SITE_URL.rstrip("/") + f"/?fetch_token={fetch_token}"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as r:
         body = r.read().decode("utf-8")
-    if "const HARDCODED" not in body:
+    if len(body) < 5000 or "const HARDCODED" not in body:
         raise RuntimeError(
-            "fetch_portal_html got HTML without HARDCODED block ‚Äî "
-            "likely the gate's login page. Check PORTAL_FETCH_TOKEN secret."
-        )
+            f"Portal fetch returned {len(body)} bytes without HARDCODED block — "
+            "PORTAL_FETCH_TOKEN may be wrong or gate bypass broke")
     return body
 
 
@@ -658,7 +661,7 @@ def main():
         user = m.get("user", "")
         text = (m.get("text", "") or "").strip()
         latest_ts = ts
-        # Process posts from Sophia AND Mai (Jeamai) ‚Äî both maintain script updates.
+        # Process posts from Sophia AND Mai (Jeamai) — both maintain script updates.
         # Bug fixed 2026-05-13: previously only Sophia was processed, Mai's updates
         # were silently dropped (e.g., LaVie price changes, Modern Image deposit).
         if user in ALLOWED_USER_IDS and text.upper().startswith("ACTION"):

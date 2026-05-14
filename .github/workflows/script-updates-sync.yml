@@ -22,13 +22,14 @@ jobs:
         run: pip install --quiet cryptography
       - name: Run
         env:
-          PORTAL_FETCH_TOKEN: ${{ secrets.PORTAL_FETCH_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           # Netlify — required. Add these two secrets in GitHub repo settings:
           #   NETLIFY_TOKEN    = nfp_TW3wxCv4vsswfzFBVwwZmMzT5j5tWSUde6e8
           #   NETLIFY_SITE_ID  = 972558c1-0f0f-47a4-b737-b8084e4c1c4d
           NETLIFY_TOKEN: ${{ secrets.NETLIFY_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          # Required to fetch portal HTML through the passcode gate
+          PORTAL_FETCH_TOKEN: ${{ secrets.PORTAL_FETCH_TOKEN }}
           # Google Sheets — optional. Only needed to keep offer metadata (active/price/URLs)
           # in sync. Q&A now lives in HARDCODED and does NOT use this path.
           GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
