@@ -1,8 +1,8 @@
 {
-  "snapshot_date": "2026-05-10",
-  "snapshot_at_utc": "2026-05-10T06:36:27.124076+00:00",
+  "snapshot_date": "2026-08-09",
+  "snapshot_at_utc": "2026-08-09T05:08:43.995080+00:00",
   "counts": {
-    "call_scores": 240,
+    "call_scores": "ERROR: HTTP Error 401: Unauthorized",
     "bookings": "ERROR: HTTP Error 410: Gone",
     "daily_dials": "ERROR: HTTP Error 410: Gone",
     "weekly_tips": "ERROR: HTTP Error 410: Gone",
