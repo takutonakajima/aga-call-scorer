@@ -326,7 +326,7 @@ def main():
     for rep in REP_MAP.values():
         b = block_for_rep(rep, now_est.date(), overrides)
         s = shift_status(rep, now_est, overrides)
-        log(f"  {rep:<10} block {b} ({BLOCKS[b]['label']}) — currently {s}")
+        log(f"  {rep:<10} block {b} ({BLOCKS[b]['label'] if b else '—'}) — currently {s}")
 
     long_window = gather_window(VOICEMAIL_WALL_WINDOW)
     short_window = gather_window(NO_CONVERSATIONS_WINDOW)
