@@ -1,6 +1,6 @@
 {
-  "snapshot_date": "2026-06-23",
-  "snapshot_at_utc": "2026-06-23T07:52:37.805356+00:00",
+  "snapshot_date": "2026-09-22",
+  "snapshot_at_utc": "2026-09-22T09:10:10.535018+00:00",
   "counts": {
     "call_scores": "ERROR: HTTP Error 401: Unauthorized",
     "bookings": "ERROR: HTTP Error 410: Gone",
