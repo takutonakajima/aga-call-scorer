@@ -10,6 +10,10 @@ on:
     - cron: '15 0-2 * * *'    # business hours, every hour at :15 (UTC 00:00-02:59)
   workflow_dispatch:
 
+# Least privilege (2026-09-24) — reads the checkout, calls external APIs only.
+permissions:
+  contents: read
+
 jobs:
   run:
     runs-on: ubuntu-latest

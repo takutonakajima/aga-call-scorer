@@ -7,6 +7,11 @@ on:
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
+# Least privilege (2026-09-24) — deploys to NETLIFY using NETLIFY_TOKEN, which
+# is unrelated to GITHUB_TOKEN. It never writes to this repo.
+permissions:
+  contents: read
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -23,9 +28,11 @@ jobs:
       - name: Run
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          # Netlify — required. Add these two secrets in GitHub repo settings:
-          #   NETLIFY_TOKEN    = nfp_TW3wxCv4vsswfzFBVwwZmMzT5j5tWSUde6e8
-          #   NETLIFY_SITE_ID  = 972558c1-0f0f-47a4-b737-b8084e4c1c4d
+          # Netlify — required. Set both in GitHub repo settings → Secrets and
+          # variables → Actions. Their VALUES are deliberately not written here:
+          # this repo is PUBLIC, and a live nfp_ token sat in this comment from
+          # 2026-05-04 until 2026-09-24. Never paste a credential into a comment
+          # to document it — name the secret, not its value.
           NETLIFY_TOKEN: ${{ secrets.NETLIFY_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
           # Required to fetch portal HTML through the passcode gate

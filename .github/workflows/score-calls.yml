@@ -12,6 +12,13 @@ on:
     - cron: '0 3-11 * * *'      # off-hours sweep, hourly (UTC 03:00-11:59)
   workflow_dispatch:
 
+# Least privilege (2026-09-24). Without this key the job inherits the repo's
+# DEFAULT GITHUB_TOKEN scope, which on older repos is read/write. This workflow
+# only reads the checkout and calls external APIs — it never writes to the repo.
+# (backup-data.yml is the only one that needs contents: write, to push backups/.)
+permissions:
+  contents: read
+
 jobs:
   run:
     runs-on: ubuntu-latest

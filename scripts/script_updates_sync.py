@@ -24,9 +24,11 @@ Why this is reliable:
   - The Google Sheet is still updated for offer visibility (active=YES/NO,
     price, URLs) but is no longer involved in Q&A at all.
 
-New GitHub Actions secrets required:
-  NETLIFY_TOKEN    ‚Äî nfp_TW3wxCv4vsswfzFBVwwZmMzT5j5tWSUde6e8
-  NETLIFY_SITE_ID  ‚Äî 972558c1-0f0f-47a4-b737-b8084e4c1c4d
+GitHub Actions secrets required (names only — this repo is PUBLIC):
+  NETLIFY_TOKEN, NETLIFY_SITE_ID
+  A live nfp_ Netlify token was written into this docstring on 2026-05-04 and
+  stayed publicly readable until 2026-09-24. Document the secret NAME, never
+  its value.
 
 Existing secrets still used:
   SLACK_BOT_TOKEN, SCRIPT_SYNC_STATE_GET, SCRIPT_SYNC_STATE_SET,

@@ -28,11 +28,20 @@ from _config import (REP_MAP, ALERT_WEBHOOK,
                      SCORE_API, ANOMALY_STATE_API, ANOMALY_STATE_INGEST)
 from _schedule import EST
 
-# Live read APIs (the dashboards already use these)
-BOOKING_API = "https://hook.us2.make.com/zta4icvee2vs637c7h823dbbvl3dma3g"
-DIALS_API   = "https://hook.us2.make.com/iqiuk23ks9uscx79rs3b5pqj85tnugqi"
-TIPS_API    = "https://hook.us2.make.com/92wixa36ff24n1k6dt57a4mn4qrfxylb"
-TOPCALL_API = "https://hook.us2.make.com/2ncatyrspbm62lt98vah5ef362sf89wv"
+# Live read APIs. A Make.com webhook URL IS a credential — the URL is the only
+# thing standing between the internet and the data store behind it. These four
+# sat hardcoded in this PUBLIC repo, so they must be treated as burned and
+# ROTATED in Make.com, not merely moved.
+#
+# Env-first with the current value as fallback, so this hourly job keeps working
+# through the rotation rather than breaking the moment a secret is missing.
+# ⚠️ ONCE the four BOOKING/DIALS/TIPS/TOPCALL _API_URL secrets hold ROTATED
+# URLs, DELETE the fallbacks below — until then the old URLs remain readable
+# here and rotation is not actually complete.
+BOOKING_API = os.environ.get("BOOKING_API_URL") or "https://hook.us2.make.com/zta4icvee2vs637c7h823dbbvl3dma3g"
+DIALS_API   = os.environ.get("DIALS_API_URL")   or "https://hook.us2.make.com/iqiuk23ks9uscx79rs3b5pqj85tnugqi"
+TIPS_API    = os.environ.get("TIPS_API_URL")    or "https://hook.us2.make.com/92wixa36ff24n1k6dt57a4mn4qrfxylb"
+TOPCALL_API = os.environ.get("TOPCALL_API_URL") or "https://hook.us2.make.com/2ncatyrspbm62lt98vah5ef362sf89wv"
 
 # Staleness thresholds — minutes
 BOOKING_STALE_MIN = 12 * 60       # 12h — bookings can be slow during off hours

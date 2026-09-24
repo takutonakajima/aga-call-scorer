@@ -5,6 +5,10 @@ on:
     - cron: '20 * * * *'   # every hour at :20
   workflow_dispatch:
 
+# Least privilege (2026-09-24) — reads the checkout, calls external APIs only.
+permissions:
+  contents: read
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -28,4 +32,13 @@ jobs:
           SHIFT_OVERRIDE_API_URL: ${{ secrets.SHIFT_OVERRIDE_API_URL }}
           ANOMALY_STATE_API_URL: ${{ secrets.ANOMALY_STATE_API_URL }}
           ANOMALY_STATE_INGEST_URL: ${{ secrets.ANOMALY_STATE_INGEST_URL }}
+          # Make.com read APIs. These were hardcoded in health_monitor.py in this
+          # PUBLIC repo, so treat them as burned: rotate in Make.com, set these
+          # four secrets, THEN delete the fallbacks in the script.
+          # An unset secret resolves to "" and the script falls back, so landing
+          # these before the secrets exist is safe.
+          BOOKING_API_URL: ${{ secrets.BOOKING_API_URL }}
+          DIALS_API_URL: ${{ secrets.DIALS_API_URL }}
+          TIPS_API_URL: ${{ secrets.TIPS_API_URL }}
+          TOPCALL_API_URL: ${{ secrets.TOPCALL_API_URL }}
         run: python scripts/health_monitor.py
