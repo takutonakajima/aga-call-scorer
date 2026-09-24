@@ -2,29 +2,23 @@
 """
 AGA Call Scorer — Twilio recording → Gemini 2.5 Flash → Make.com data store 95103.
 
-Runs every 15 min via launchd. Scores any recording >=30s that hasn't been
-processed before. State tracked in ~/.aga-scored-sids.
+LIVE — scheduled by GitHub Actions, NOT launchd. See
+.github/workflows/score-calls.yml: every 15 min 12:00-02:59 UTC (VA business
+hours) + hourly off-hours sweep, ~69 runs/day. The local launchd job
+com.aga.callscorer WAS disabled on 2026-06-02, and AGA HQ's
+docs/SCHEDULED_ROUTINES.md says an edge function "replaced local
+com.aga.callscorer (score_calls.py)" — that sentence means the LOCAL SCHEDULER
+was replaced, not this script. It is still the thing CI executes. A 2026-09-24
+audit read that line plus the disabled plist, concluded the file was dead, and
+guarded it with a hard sys.exit — which broke scoring until it was reverted.
+Do not retire this file without first checking .github/workflows/.
+
+Scores any recording >=30s that hasn't been processed before.
+State tracked in ~/.aga-scored-sids.
 
 Fields written match what scenario 4886450 ("03 - Call Coaching Data API")
 reads to power the Netlify rep dashboard.
 """
-
-# ─── SUPERSEDED 2026-06-02 — DO NOT RUN ──────────────────────────────────────
-# Replaced by the `call-scorer` Supabase edge function (AGA HQ repo: docs/SCHEDULED_ROUTINES.md — this is a SEPARATE repo).
-# The launchd job com.aga.callscorer was disabled on 2026-06-02 and this file
-# stayed behind. It is NOT inert: it still writes call scores into Make data store 95103, which powers the rep dashboard.
-#
-# The docstring above still describes the old schedule; that schedule is dead.
-# Kept in-tree for reference and diffing against the edge function.
-# To run it deliberately anyway:  AGA_RUN_SUPERSEDED=1 python3 scripts/score_calls.py
-import os as _os, sys as _sys
-if _os.environ.get("AGA_RUN_SUPERSEDED") != "1":
-    _sys.exit(
-        "REFUSING TO RUN — superseded by the `call-scorer` edge function on 2026-06-02.\n"
-        "This script writes to production and its logic has diverged.\n"
-        "Set AGA_RUN_SUPERSEDED=1 only if you truly mean to run the old path."
-    )
-# ─────────────────────────────────────────────────────────────────────────────
 import base64
 import json
 import time
