@@ -8,6 +8,23 @@ processed before. State tracked in ~/.aga-scored-sids.
 Fields written match what scenario 4886450 ("03 - Call Coaching Data API")
 reads to power the Netlify rep dashboard.
 """
+
+# ─── SUPERSEDED 2026-06-02 — DO NOT RUN ──────────────────────────────────────
+# Replaced by the `call-scorer` Supabase edge function (AGA HQ repo: docs/SCHEDULED_ROUTINES.md — this is a SEPARATE repo).
+# The launchd job com.aga.callscorer was disabled on 2026-06-02 and this file
+# stayed behind. It is NOT inert: it still writes call scores into Make data store 95103, which powers the rep dashboard.
+#
+# The docstring above still describes the old schedule; that schedule is dead.
+# Kept in-tree for reference and diffing against the edge function.
+# To run it deliberately anyway:  AGA_RUN_SUPERSEDED=1 python3 scripts/score_calls.py
+import os as _os, sys as _sys
+if _os.environ.get("AGA_RUN_SUPERSEDED") != "1":
+    _sys.exit(
+        "REFUSING TO RUN — superseded by the `call-scorer` edge function on 2026-06-02.\n"
+        "This script writes to production and its logic has diverged.\n"
+        "Set AGA_RUN_SUPERSEDED=1 only if you truly mean to run the old path."
+    )
+# ─────────────────────────────────────────────────────────────────────────────
 import base64
 import json
 import time

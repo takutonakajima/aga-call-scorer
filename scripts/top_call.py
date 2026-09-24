@@ -9,6 +9,24 @@ MP3 from Twilio, saves it into the Netlify deploy folder, generates a Gemini
 
 The dashboard then renders a "🏆 Top Call This Week" card with audio playback.
 """
+
+# ─── SUPERSEDED 2026-06-02 — DO NOT RUN ──────────────────────────────────────
+# Replaced by the `top-call` Supabase edge function (AGA HQ repo: docs/SCHEDULED_ROUTINES.md — this is a SEPARATE repo).
+# The launchd job com.aga.topcall was disabled on 2026-06-02 and this file
+# stayed behind. It is NOT inert: it still writes the Top Call of the Week into the Make data store and the Netlify
+#   deploy folder that the rep dashboard renders.
+#
+# The docstring above still describes the old schedule; that schedule is dead.
+# Kept in-tree for reference and diffing against the edge function.
+# To run it deliberately anyway:  AGA_RUN_SUPERSEDED=1 python3 scripts/top_call.py
+import os as _os, sys as _sys
+if _os.environ.get("AGA_RUN_SUPERSEDED") != "1":
+    _sys.exit(
+        "REFUSING TO RUN — superseded by the `top-call` edge function on 2026-06-02.\n"
+        "This script writes to production and its logic has diverged.\n"
+        "Set AGA_RUN_SUPERSEDED=1 only if you truly mean to run the old path."
+    )
+# ─────────────────────────────────────────────────────────────────────────────
 import base64
 import json
 import shutil
