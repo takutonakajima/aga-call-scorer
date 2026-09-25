@@ -267,6 +267,36 @@ def main():
     for k, v in results.items():
         emoji = "✅" if v is True else "❌" if v is False else "⏭️"
         log(f"  {emoji} {k}")
+
+    # A check returns None when it could not run at all — its data source was
+    # unreachable. Until 2026-09-25 that was simply printed as ⏭️ and main()
+    # exited 0, so a monitor that could see NOTHING reported a green hourly run.
+    # That is the worst possible failure mode for a health monitor: it is exactly
+    # the state in which something is wrong, and it looked fine.
+    #
+    # Alerting is not the answer here. fire() gates on is_already_alerted_today(),
+    # which reads ANOMALY_STATE_API — also 410 Gone — so it always returns False
+    # and every alert would re-fire every hour: 5 checks x 24 runs = ~120
+    # messages/day into a channel people already ignore.
+    #
+    # Use the one signal in this repo that demonstrably still works: CI status.
+    # A red run in the Actions tab is visible, idempotent (one per run, not N),
+    # and costs nobody a Slack notification. It is what weekly_digest.py does by
+    # accident and the reason its breakage is the only one anyone could have seen.
+    unreachable = [k for k, v in results.items() if v is None]
+    if len(unreachable) == len(results):
+        log("")
+        log("*** EVERY health check was unreachable — this monitor is BLIND. ***")
+        log("    Not one pipeline was actually verified this run. Treat previous")
+        log("    green runs as unverified, not healthy.")
+        log(f"    Unreachable: {', '.join(unreachable)}")
+        log("    All Make read endpoints used by this repo return 410 Gone; see")
+        log("    backups/<date>/_summary.json for the per-store status.")
+        sys.exit(1)
+    if unreachable:
+        log(f"  warning: {len(unreachable)}/{len(results)} checks could not run "
+            f"({', '.join(unreachable)}) — those pipelines are UNVERIFIED, not healthy")
+
     log("Done.")
 
 
