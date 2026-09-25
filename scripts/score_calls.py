@@ -101,7 +101,42 @@ def load_state():
         return sids
     except Exception as e:
         log(f"  warning: could not fetch from Score API ({e}); falling back to local file")
-        return set(STATE_FILE.read_text().split()) if STATE_FILE.exists() else set()
+        fallback = set(STATE_FILE.read_text().split()) if STATE_FILE.exists() else set()
+        if not fallback:
+            # An EMPTY seen-set is the most dangerous possible default here: the filter
+            # in main() is `r["sid"] not in seen`, so an empty set matches nothing and
+            # EVERY recording >=30s in the latest 100 is re-scored — paying Gemini again
+            # for calls already scored, ~69 CI runs/day.
+            #
+            # This is not a rare edge. In GitHub Actions $HOME is fresh per run, so
+            # STATE_FILE never exists and this branch is reached on EVERY run whenever
+            # SCORE_API is unreachable. backup_data.py calls that same endpoint the same
+            # way (POST, b"{}") and has recorded it as 401 Unauthorized in 91 of 91
+            # tracked snapshots — so this has most likely been the steady state for
+            # months, silently, because ALERT_WEBHOOK was imported here and never used.
+            #
+            # Behaviour is deliberately NOT changed: aborting would stop scoring
+            # altogether, which is a bigger outage than duplicate scoring. Make it loud
+            # and let a human decide whether to repair SCORE_API_URL or move the dedupe.
+            log("  *** SCORE_API UNREACHABLE AND NO LOCAL STATE — dedupe is INERT: "
+                "every recording in this batch will be re-scored ***")
+            try:
+                http("POST", ALERT_WEBHOOK,
+                     headers={"Content-Type": "application/json"},
+                     data=json.dumps({
+                         "rep": "_SYSTEM",
+                         "pattern": "SCORER_DEDUPE_INERT",
+                         "title": "Call scorer is re-scoring every call",
+                         "message": (
+                             f"load_state() could not reach the Score API ({e}) and no local "
+                             f"state file exists, so the already-scored filter is empty. Every "
+                             f"recording >=30s in the latest 100 is re-scored on every run "
+                             f"(~69 runs/day), re-paying Gemini each time. Fix SCORE_API_URL."
+                         ),
+                     }).encode())
+            except Exception as alert_err:
+                log(f"  (could not send dedupe-inert alert: {alert_err})")
+        return fallback
 
 
 def save_state(sids):
