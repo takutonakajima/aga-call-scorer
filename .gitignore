@@ -4,3 +4,23 @@ __pycache__/
 .DS_Store
 audio/
 *.log
+
+# ─── PII: never commit data-store dumps to this repo ─────────────────────────
+# THIS REPOSITORY IS PUBLIC.
+#
+# backup_data.py writes one JSON per data store to backups/<date>/. The
+# call_scores dump carries contact_name (the PROSPECT's name), rep_name,
+# summary (the AI's write-up of the call) and recording_sid. ~500 such records
+# were committed here in June 2026 and later deleted from HEAD — they remain in
+# this repo's public history.
+#
+# The ONLY reason it stopped is that the read API began returning 401
+# Unauthorized (all 91 tracked snapshots record call_scores as an error string).
+# That is an accident, not a control: the write path in backup_data.py is
+# intact, the workflow still runs `git add backups/` and pushes, and nothing
+# here excluded these files. Repairing that credential would have silently
+# resumed publishing prospect PII at 04:00 UTC — a fix that reopens a leak.
+#
+# Keep _summary.json (counts only, no PII) so the snapshot index still works.
+backups/*/*.json
+!backups/*/_summary.json
