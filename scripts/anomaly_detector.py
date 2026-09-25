@@ -78,7 +78,30 @@ def load_state():
                     state.setdefault(rep, {})[pat] = dt
             return state
         except Exception as e:
+            # `{}` is not a neutral default — already_alerted_today() does
+            #     state.get(rep, {}).get(pattern) == today
+            # which is always False against an empty dict, so the once-a-day
+            # dedupe never fires and EVERY anomaly re-alerts on EVERY run. This
+            # job runs 15x/day across 4 patterns (VOICEMAIL_WALL,
+            # LOW_CONNECT_RATE, NO_CONVERSATIONS, LONG_GAP), so one persistent
+            # anomaly becomes ~15 messages/day to the same rep.
+            #
+            # Note this branch is reached whenever ANOMALY_STATE_API is merely
+            # SET-BUT-BROKEN (it returns before the local-file fallback below).
+            # backup_data.py records that endpoint as 410 Gone — along with every
+            # other Make read endpoint this repo uses — so this is the live state,
+            # not a hypothetical.
+            #
+            # Behaviour left unchanged on purpose: the alternative (abort, or
+            # treat everything as already-alerted) would silently SUPPRESS real
+            # anomalies, which is worse than duplicates. Deliberately does NOT
+            # fire an alert either — this script's output IS alerts, so alerting
+            # about alert-spam would add to the problem. Fixing it properly means
+            # repairing ANOMALY_STATE_API or moving the state somewhere durable,
+            # which needs whoever owns that Make data store.
             log(f"  warning: anomaly state fetch failed ({e}); using empty state")
+            log("  *** ANOMALY STATE UNAVAILABLE — once-a-day dedupe is INERT: "
+                "every anomaly found this run will re-alert even if already sent ***")
             return {}
     if STATE_FILE.exists():
         try:
