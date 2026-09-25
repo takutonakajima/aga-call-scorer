@@ -12,6 +12,28 @@ For each rep with calls in the past week:
 The rep dashboard fetches from the Weekly Tips API and shows the synthesized
 tips at the top of the page (replacing the client-side keyword clustering).
 """
+
+# ─── RETIRED 2026-09-25 — DO NOT RUN, DO NOT RE-ENABLE ───────────────────────
+# Replaced by the `weekly-digest` Supabase edge function (pg_cron job 11, Mondays 11:45 UTC).
+# Evidence it is live: scheduled and active.
+#
+# Its GitHub Actions workflow is `disabled_manually` and has not executed since
+# 2026-06-15. That state is NOT visible in the .yml file — the cron: lines in
+# there look perfectly active, which is exactly what fooled an audit on
+# 2026-09-25 into reporting that this script was still running and wasting
+# money. Workflow STATE lives in the Actions API, not the file:
+#     curl -s https://api.github.com/repos/takutonakajima/aga-call-scorer/actions/workflows
+#
+# Kept in-tree for reference and for diffing against the edge function. If you
+# genuinely need to run it by hand:  AGA_RUN_SUPERSEDED=1 python3 scripts/weekly_digest.py
+import os as _os, sys as _sys
+if _os.environ.get("AGA_RUN_SUPERSEDED") != "1":
+    _sys.exit(
+        "REFUSING TO RUN — retired 2026-09-25, replaced by the `weekly-digest` edge function.\n"
+        "Re-enabling this alongside the edge function would double-process.\n"
+        "Set AGA_RUN_SUPERSEDED=1 only if you truly mean to run the old path."
+    )
+# ─────────────────────────────────────────────────────────────────────────────
 import json
 import time
 import urllib.error

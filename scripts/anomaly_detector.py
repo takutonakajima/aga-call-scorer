@@ -15,6 +15,28 @@ Patterns:
 Each fired alert posts a fully-formatted Slack message via the alert webhook.
 The message includes shift context, last-active time, benchmark + suggested action.
 """
+
+# ─── RETIRED 2026-09-25 — DO NOT RUN, DO NOT RE-ENABLE ───────────────────────
+# Replaced by the `anomaly-detector` Supabase edge function (pg_cron job 10, hourly at :32).
+# Evidence it is live: 23 successful invocations in the last 24h.
+#
+# Its GitHub Actions workflow is `disabled_manually` and has not executed since
+# 2026-06-15. That state is NOT visible in the .yml file — the cron: lines in
+# there look perfectly active, which is exactly what fooled an audit on
+# 2026-09-25 into reporting that this script was still running and wasting
+# money. Workflow STATE lives in the Actions API, not the file:
+#     curl -s https://api.github.com/repos/takutonakajima/aga-call-scorer/actions/workflows
+#
+# Kept in-tree for reference and for diffing against the edge function. If you
+# genuinely need to run it by hand:  AGA_RUN_SUPERSEDED=1 python3 scripts/anomaly_detector.py
+import os as _os, sys as _sys
+if _os.environ.get("AGA_RUN_SUPERSEDED") != "1":
+    _sys.exit(
+        "REFUSING TO RUN — retired 2026-09-25, replaced by the `anomaly-detector` edge function.\n"
+        "Re-enabling this alongside the edge function would double-process.\n"
+        "Set AGA_RUN_SUPERSEDED=1 only if you truly mean to run the old path."
+    )
+# ─────────────────────────────────────────────────────────────────────────────
 import json
 import urllib.error
 import urllib.request
@@ -81,16 +103,20 @@ def load_state():
             # `{}` is not a neutral default — already_alerted_today() does
             #     state.get(rep, {}).get(pattern) == today
             # which is always False against an empty dict, so the once-a-day
-            # dedupe never fires and EVERY anomaly re-alerts on EVERY run. This
-            # job runs 15x/day across 4 patterns (VOICEMAIL_WALL,
-            # LOW_CONNECT_RATE, NO_CONVERSATIONS, LONG_GAP), so one persistent
-            # anomaly becomes ~15 messages/day to the same rep.
+            # dedupe never fires and EVERY anomaly re-alerts on EVERY run.
+            #
+            # NOT CURRENTLY FIRING: this script is retired (see the guard at the
+            # top) and its workflow has been disabled since 2026-06-15, so the
+            # "~15 duplicate messages/day" an earlier note claimed here never
+            # actually happened. Kept as a defect record in case anyone ports
+            # this logic — the live `anomaly-detector` edge function must not
+            # inherit it.
             #
             # Note this branch is reached whenever ANOMALY_STATE_API is merely
             # SET-BUT-BROKEN (it returns before the local-file fallback below).
             # backup_data.py records that endpoint as 410 Gone — along with every
-            # other Make read endpoint this repo uses — so this is the live state,
-            # not a hypothetical.
+            # other Make read endpoint this repo uses. That much is real; what was
+            # wrong was calling the resulting spam live. Nothing runs this.
             #
             # Behaviour left unchanged on purpose: the alternative (abort, or
             # treat everything as already-alerted) would silently SUPPRESS real

@@ -12,6 +12,28 @@ How it works:
   4. Tallies dials and connects (calls ≥30s) per rep per day.
   5. POSTs each (rep, date) tally to the Daily Dials Ingest webhook.
 """
+
+# ─── RETIRED 2026-09-25 — DO NOT RUN, DO NOT RE-ENABLE ───────────────────────
+# Replaced by the `hp-dialer-sync + resolve-dial-sync` Supabase edge function (pg_cron jobs 76 and 128, both hourly).
+# Evidence it is live: rep_dials last written minutes ago.
+#
+# Its GitHub Actions workflow is `disabled_manually` and has not executed since
+# 2026-06-15. That state is NOT visible in the .yml file — the cron: lines in
+# there look perfectly active, which is exactly what fooled an audit on
+# 2026-09-25 into reporting that this script was still running and wasting
+# money. Workflow STATE lives in the Actions API, not the file:
+#     curl -s https://api.github.com/repos/takutonakajima/aga-call-scorer/actions/workflows
+#
+# Kept in-tree for reference and for diffing against the edge function. If you
+# genuinely need to run it by hand:  AGA_RUN_SUPERSEDED=1 python3 scripts/dial_tracker.py
+import os as _os, sys as _sys
+if _os.environ.get("AGA_RUN_SUPERSEDED") != "1":
+    _sys.exit(
+        "REFUSING TO RUN — retired 2026-09-25, replaced by the `hp-dialer-sync + resolve-dial-sync` edge function.\n"
+        "Re-enabling this alongside the edge function would double-process.\n"
+        "Set AGA_RUN_SUPERSEDED=1 only if you truly mean to run the old path."
+    )
+# ─────────────────────────────────────────────────────────────────────────────
 import json
 import urllib.error
 import urllib.request

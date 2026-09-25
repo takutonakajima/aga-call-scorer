@@ -2,16 +2,19 @@
 """
 AGA Call Scorer — Twilio recording → Gemini 2.5 Flash → Make.com data store 95103.
 
-LIVE — scheduled by GitHub Actions, NOT launchd. See
-.github/workflows/score-calls.yml: every 15 min 12:00-02:59 UTC (VA business
-hours) + hourly off-hours sweep, ~69 runs/day. The local launchd job
-com.aga.callscorer WAS disabled on 2026-06-02, and AGA HQ's
-docs/SCHEDULED_ROUTINES.md says an edge function "replaced local
-com.aga.callscorer (score_calls.py)" — that sentence means the LOCAL SCHEDULER
-was replaced, not this script. It is still the thing CI executes. A 2026-09-24
-audit read that line plus the disabled plist, concluded the file was dead, and
-guarded it with a hard sys.exit — which broke scoring until it was reverted.
-Do not retire this file without first checking .github/workflows/.
+RETIRED 2026-09-25 — see the guard below. Nothing runs this.
+
+Both of its schedulers are off: the local launchd job com.aga.callscorer was
+disabled 2026-06-02, and the GitHub Actions workflow has been disabled_manually
+since 2026-06-15. docs/SCHEDULED_ROUTINES.md is correct that an edge function
+"replaced local com.aga.callscorer (score_calls.py)" — `call-scorer` now does
+this work on pg_cron job 27.
+
+History worth keeping, because this paragraph was wrong twice in two days: a
+2026-09-24 audit retired the file, then reverted on finding score-calls.yml and
+wrote here that CI still ran it ~69x/day. That was never checked against the
+Actions API — the workflow was already disabled. The .yml file's cron: lines
+look active whether or not the workflow is. Check STATE, not the file.
 
 Scores any recording >=30s that hasn't been processed before.
 State tracked in ~/.aga-scored-sids.
@@ -19,6 +22,28 @@ State tracked in ~/.aga-scored-sids.
 Fields written match what scenario 4886450 ("03 - Call Coaching Data API")
 reads to power the Netlify rep dashboard.
 """
+
+# ─── RETIRED 2026-09-25 — DO NOT RUN, DO NOT RE-ENABLE ───────────────────────
+# Replaced by the `call-scorer` Supabase edge function (pg_cron job 27, */5).
+# Evidence it is live: 283 successful invocations in the last 24h.
+#
+# Its GitHub Actions workflow is `disabled_manually` and has not executed since
+# 2026-06-15. That state is NOT visible in the .yml file — the cron: lines in
+# there look perfectly active, which is exactly what fooled an audit on
+# 2026-09-25 into reporting that this script was still running and wasting
+# money. Workflow STATE lives in the Actions API, not the file:
+#     curl -s https://api.github.com/repos/takutonakajima/aga-call-scorer/actions/workflows
+#
+# Kept in-tree for reference and for diffing against the edge function. If you
+# genuinely need to run it by hand:  AGA_RUN_SUPERSEDED=1 python3 scripts/score_calls.py
+import os as _os, sys as _sys
+if _os.environ.get("AGA_RUN_SUPERSEDED") != "1":
+    _sys.exit(
+        "REFUSING TO RUN — retired 2026-09-25, replaced by the `call-scorer` edge function.\n"
+        "Re-enabling this alongside the edge function would double-process.\n"
+        "Set AGA_RUN_SUPERSEDED=1 only if you truly mean to run the old path."
+    )
+# ─────────────────────────────────────────────────────────────────────────────
 import base64
 import json
 import time
@@ -169,8 +194,8 @@ def load_state():
                          "message": (
                              f"load_state() could not reach coaching-api ({e}) and no local "
                              f"state file exists, so the already-scored filter is empty. Every "
-                             f"recording >=30s in the latest 100 is re-scored on every run "
-                             f"(~69 runs/day), re-paying Gemini each time. Check "
+                             f"recording >=30s in the latest 100 is re-scored on every run, "
+                             f"re-paying Gemini each time. Check "
                              f"COACHING_READ_SECRET and COACHING_API_BASE."
                          ),
                      }).encode())
