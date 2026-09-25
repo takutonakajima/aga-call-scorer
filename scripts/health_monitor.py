@@ -16,6 +16,46 @@ Checks:
 Anti-spam: each broken pipeline only alerts once per 24h via the anomaly state
 data store.
 """
+
+# ─── RETIRED 2026-09-25 — DO NOT RUN, DO NOT RE-ENABLE ───────────────────────
+# Replaced by the `health-monitor` Supabase edge function (pg_cron job 126,
+# "health-monitor-hourly", :20 past every hour) — the SAME minute this script's
+# workflow fired. Both have been running side by side; only one could see.
+#
+# The edge function reads monitor_check/monitor_event straight from Postgres and
+# posts to Slack with critical/warn severity. Its checks cover this file's:
+#     bookings   -> bookings:ingesting   (rep_bookings.created_at, 12h — same)
+#     dials      -> dials:written + dials:sync_ran (6h / 3h)
+#     scores     -> cron:call-scorer     (1h — TIGHTER than this file's 4h)
+#     top call   -> cron:top-call        (9d)
+#     tips       -> cron:weekly-digest   (9d)
+#
+# Meanwhile every endpoint THIS file reads is a retired Make.com webhook, and
+# every check wraps its fetch in `except: return None`, so all five have been
+# returning None — no alerts, no errors, just silence. It could not have caught
+# anything. That is why the 2026-09-25 plan to "repoint it at coaching-api" was
+# abandoned: repointing would have rebuilt, by hand, a monitor that already
+# exists and works.
+#
+# Two traps found while checking, worth keeping if anyone revives this:
+#   - weekly_tips/top_calls label a row with the week being SUMMARISED, i.e.
+#     LAST Monday. check_weekly_tips/check_top_call compare against the CURRENT
+#     Monday, so a naive repoint would have false-alarmed every single week.
+#     Both pipelines were verified healthy (generated Mon 2026-09-21).
+#   - coaching-api /bookings returns the CURRENT WEEK only, so an early-Monday
+#     fetch is legitimately empty and would have tripped "zero records".
+#
+# Its workflow was deleted rather than left disabled: it ran hourly, so a
+# guarded script would have failed red 24x a day.
+import os as _os, sys as _sys
+if _os.environ.get("AGA_RUN_SUPERSEDED") != "1":
+    _sys.exit(
+        "REFUSING TO RUN — retired 2026-09-25, replaced by the `health-monitor` "
+        "edge function (pg_cron job 126).\n"
+        "Running both double-posts every pipeline alert to Slack.\n"
+        "Set AGA_RUN_SUPERSEDED=1 only if you truly mean to run the old path."
+    )
+# ─────────────────────────────────────────────────────────────────────────────
 import json
 import urllib.error
 import urllib.request
