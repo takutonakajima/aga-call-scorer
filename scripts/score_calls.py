@@ -46,6 +46,16 @@ MIN_DURATION_SECONDS = 30
 GEMINI_MAX_RETRIES = 3
 GEMINI_RETRY_DELAY = 8
 
+# coaching-api (Supabase) — the live replacement for the retired Make.com read
+# endpoints. The rep dashboards already read through this via the Netlify gate;
+# see Call Coaching AI/netlify/functions/gate.js, which sends the same header.
+# Default matches that gate's COACHING_API_BASE so CI only has to supply the secret.
+COACHING_API = os.environ.get(
+    "COACHING_API_BASE",
+    "https://avknogjtwgywdxhsfkji.supabase.co/functions/v1/coaching-api",
+).rstrip("/")
+COACHING_READ_SECRET = os.environ.get("COACHING_READ_SECRET", "")
+
 STATE_FILE = Path.home() / ".aga-scored-sids"
 LOG_DIR = Path.home() / "Library/Logs/aga-call-scorer"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -90,17 +100,48 @@ def http(method, url, headers=None, data=None, timeout=180):
 
 
 def load_state():
-    """Build the 'seen' set from the live Score API — the data store is the
-    source of truth, no local state file needed. Falls back to local file
-    if the API is unavailable (e.g. running in dev). Stateless = ideal for CI."""
+    """Build the 'seen' set of already-scored recording SIDs.
+
+    Reads coaching-api (Supabase), NOT the old Make.com SCORE_API.
+
+    Why this moved (2026-09-25): every Make.com READ endpoint this repo used is
+    retired. SCORE_API returns 401 and the other six return 410 Gone — confirmed
+    by backup_data.py, which has recorded exactly that in 91 of 91 snapshots. The
+    data now lives in Postgres: public.call_scores held 8,304 rows with the newest
+    written minutes before this change. coaching-api is what the rep dashboards
+    already read through, and it was BUILT as a drop-in for the old shape — its
+    aliasScore() deliberately re-emits `recording_sid`, `rep`, `date`, `score`
+    with the comment "Scripts expect these short names from the old Make.com API
+    shape". So this is the replacement finally being used, not a new integration.
+
+    Consequence of leaving it broken: load_state() fell to an empty set on every
+    CI run (GitHub Actions has a fresh $HOME, so the local fallback file never
+    exists), the `r["sid"] not in seen` filter matched nothing, and every
+    recording in the batch was re-scored — re-paying Gemini roughly 69 times a
+    day. Data stayed clean only because the ingest upserts on recording_sid.
+
+    NOTE the 500-row cap on coaching-api/scores. That is fine here: main() only
+    ever considers the latest 100 Twilio recordings, so 500 recent scores cover
+    the comparison window several times over.
+    """
+    if not COACHING_API or not COACHING_READ_SECRET:
+        # Fail loudly rather than silently returning {} — an empty seen-set is
+        # indistinguishable from "nothing has been scored yet" and re-scores
+        # everything. Missing config should look like missing config.
+        log("  ERROR: COACHING_API_BASE / COACHING_READ_SECRET not set — cannot "
+            "build the already-scored set")
+        raise RuntimeError("coaching-api not configured")
     try:
-        _, body = http("POST", SCORE_API, headers={"Content-Type": "application/json"}, data=b"{}")
+        _, body = http("GET", f"{COACHING_API}/scores",
+                       headers={"x-coaching-secret": COACHING_READ_SECRET})
         records = json.loads(body)
+        if not isinstance(records, list):
+            raise RuntimeError(f"unexpected payload: {str(records)[:120]}")
         sids = set(r.get("recording_sid", "") for r in records if r.get("recording_sid"))
-        log(f"Loaded {len(sids)} already-scored SIDs from Score API")
+        log(f"Loaded {len(sids)} already-scored SIDs from coaching-api")
         return sids
     except Exception as e:
-        log(f"  warning: could not fetch from Score API ({e}); falling back to local file")
+        log(f"  warning: could not fetch from coaching-api ({e}); falling back to local file")
         fallback = set(STATE_FILE.read_text().split()) if STATE_FILE.exists() else set()
         if not fallback:
             # An EMPTY seen-set is the most dangerous possible default here: the filter
@@ -108,17 +149,15 @@ def load_state():
             # EVERY recording >=30s in the latest 100 is re-scored — paying Gemini again
             # for calls already scored, ~69 CI runs/day.
             #
-            # This is not a rare edge. In GitHub Actions $HOME is fresh per run, so
+            # Not a rare edge: GitHub Actions gives each run a fresh $HOME, so
             # STATE_FILE never exists and this branch is reached on EVERY run whenever
-            # SCORE_API is unreachable. backup_data.py calls that same endpoint the same
-            # way (POST, b"{}") and has recorded it as 401 Unauthorized in 91 of 91
-            # tracked snapshots — so this has most likely been the steady state for
-            # months, silently, because ALERT_WEBHOOK was imported here and never used.
+            # the read API is unreachable. That was the steady state for months while
+            # this pointed at the retired Make.com SCORE_API, and it stayed invisible
+            # because ALERT_WEBHOOK was imported at the top of this file and never used.
             #
-            # Behaviour is deliberately NOT changed: aborting would stop scoring
-            # altogether, which is a bigger outage than duplicate scoring. Make it loud
-            # and let a human decide whether to repair SCORE_API_URL or move the dedupe.
-            log("  *** SCORE_API UNREACHABLE AND NO LOCAL STATE — dedupe is INERT: "
+            # Behaviour deliberately unchanged: aborting would stop scoring altogether,
+            # a bigger outage than duplicate scoring. Make it loud instead.
+            log("  *** coaching-api UNREACHABLE AND NO LOCAL STATE — dedupe is INERT: "
                 "every recording in this batch will be re-scored ***")
             try:
                 http("POST", ALERT_WEBHOOK,
@@ -128,10 +167,11 @@ def load_state():
                          "pattern": "SCORER_DEDUPE_INERT",
                          "title": "Call scorer is re-scoring every call",
                          "message": (
-                             f"load_state() could not reach the Score API ({e}) and no local "
+                             f"load_state() could not reach coaching-api ({e}) and no local "
                              f"state file exists, so the already-scored filter is empty. Every "
                              f"recording >=30s in the latest 100 is re-scored on every run "
-                             f"(~69 runs/day), re-paying Gemini each time. Fix SCORE_API_URL."
+                             f"(~69 runs/day), re-paying Gemini each time. Check "
+                             f"COACHING_READ_SECRET and COACHING_API_BASE."
                          ),
                      }).encode())
             except Exception as alert_err:

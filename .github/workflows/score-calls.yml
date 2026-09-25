@@ -42,4 +42,10 @@ jobs:
           SHIFT_OVERRIDE_API_URL: ${{ secrets.SHIFT_OVERRIDE_API_URL }}
           ANOMALY_STATE_API_URL: ${{ secrets.ANOMALY_STATE_API_URL }}
           ANOMALY_STATE_INGEST_URL: ${{ secrets.ANOMALY_STATE_INGEST_URL }}
+          # coaching-api (Supabase) — replaces the retired Make.com SCORE_API for the
+          # already-scored lookup. Without it load_state() raises and the run fails
+          # LOUDLY, instead of quietly re-scoring every call the way it did for months
+          # while pointed at the 401'd Make endpoint. COACHING_API_BASE is optional;
+          # the script defaults to the same base the Netlify gate already uses.
+          COACHING_READ_SECRET: ${{ secrets.COACHING_READ_SECRET }}
         run: python scripts/score_calls.py
