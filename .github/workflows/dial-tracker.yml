@@ -1,3 +1,16 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ DISABLED — has not run since 2026-06-15. DO NOT RE-ENABLE.               ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+# Superseded by the Supabase edge function hp-dialer-sync + resolve-dial-sync (pg_cron jobs 76 and 128, hourly).
+#
+# The cron: schedule below is INERT. GitHub stores workflow state (`active` vs
+# `disabled_manually`) OUTSIDE the file, so this schedule reads as live whether
+# or not it is. Confirm before trusting it:
+#     curl -s https://api.github.com/repos/takutonakajima/aga-call-scorer/actions/workflows
+#
+# Its script is guarded — re-enabling this workflow will not double-process, it
+# will just fail red on every run. Remove the guard in the script too if you
+# genuinely mean to bring this back, and disable the edge function first.
 name: dial_tracker.py
 
 on:

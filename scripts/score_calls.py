@@ -139,11 +139,12 @@ def load_state():
     with the comment "Scripts expect these short names from the old Make.com API
     shape". So this is the replacement finally being used, not a new integration.
 
-    Consequence of leaving it broken: load_state() fell to an empty set on every
-    CI run (GitHub Actions has a fresh $HOME, so the local fallback file never
-    exists), the `r["sid"] not in seen` filter matched nothing, and every
-    recording in the batch was re-scored — re-paying Gemini roughly 69 times a
-    day. Data stayed clean only because the ingest upserts on recording_sid.
+    What this WOULD do if run: load_state() falls to an empty set (GitHub Actions
+    has a fresh $HOME, so the local fallback file never exists), the
+    `r["sid"] not in seen` filter matches nothing, and every recording in the
+    batch is re-scored, re-paying Gemini each time. An earlier note here said
+    that was happening ~69x/day; it was not — the workflow has been disabled
+    since 2026-06-15. Fixed anyway so the trap is gone if anyone revives this.
 
     NOTE the 500-row cap on coaching-api/scores. That is fine here: main() only
     ever considers the latest 100 Twilio recordings, so 500 recent scores cover
