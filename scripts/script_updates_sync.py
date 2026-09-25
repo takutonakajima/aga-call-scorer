@@ -695,6 +695,39 @@ def main():
     # ‚îÄ‚îÄ 4. Rebuild index.html with updated HARDCODED ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     new_html = replace_hardcoded(html, hc_match, hc_data)
 
+    # ── 4b. Validate the ARTIFACT before it reaches reps ──────────────────────
+    # replace_hardcoded() is raw string splicing (html[:start] + json + html[end:]),
+    # and this job deploys straight to the LIVE rep call portal every 15 minutes,
+    # driven by whatever someone typed in Slack. Until 2026-09-25 nothing checked
+    # the result — a malformed HARDCODED block would publish and reps would get the
+    # infinite-spinner JS parse error the portal has already suffered once.
+    #
+    # Validate by round-tripping the artifact we are about to ship, not the inputs
+    # we think we wrote: re-extract and re-parse from new_html itself. Also refuse
+    # a run that loses clinics — apply_to_hardcoded() mutates in place, so a bug
+    # there drops clinics silently, and a portal missing a clinic makes the bot
+    # answer with no context rather than fail loudly.
+    try:
+        check_data, _ = extract_hardcoded(new_html)
+    except Exception as e:
+        log(f"  PRE-DEPLOY VALIDATION FAILED: {e}")
+        slack_dm(SOPHIA_USER_ID,
+                 f"🛑 Script update NOT deployed — the rebuilt index.html failed "
+                 f"validation: `{e}`\nThe live portal is untouched. Changes will be "
+                 f"retried next sync; if this repeats, the parser needs a look.")
+        sys.exit(1)
+
+    if len(check_data) < len(hc_data):
+        log(f"  PRE-DEPLOY VALIDATION FAILED: clinic count fell "
+            f"{len(hc_data)} -> {len(check_data)}")
+        slack_dm(SOPHIA_USER_ID,
+                 f"🛑 Script update NOT deployed — rebuilt portal has "
+                 f"{len(check_data)} clinics, expected {len(hc_data)}. "
+                 f"The live portal is untouched.")
+        sys.exit(1)
+
+    log(f"  pre-deploy validation OK ({len(check_data)} clinics, HARDCODED re-parses)")
+
     # ‚îÄ‚îÄ 5. Deploy to Netlify ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ
     log("  Deploying to Netlify ‚Ä¶")
     try:
